@@ -13,6 +13,8 @@ import { csrfIssueCookie, csrfValidate, getCsrfToken } from './middleware/csrf.j
 import { GcClient } from './gc-client.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { beadsRouter } from './routes/beads.js';
+import { mailRouter } from './routes/mail.js';
+import { mailSendRouter } from './routes/mail-send.js';
 import { setAuditLogPath } from './audit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -56,6 +58,11 @@ function main(): void {
   writeRouter.use(csrfValidate);
   writeRouter.use('/sessions', sessionsRouter(gc));
   writeRouter.use('/beads', beadsRouter(gc));
+  writeRouter.use('/mail', mailRouter(gc));
+  // mail-send is a SEPARATE router mounted at its own path. The handler in
+  // mail-send.ts has no `viewing-as` parameter — physical separation per
+  // architect th-1i30ih §"Identity-switching for mail".
+  writeRouter.use('/mail-send', mailSendRouter());
 
   app.use('/api', writeRouter);
 

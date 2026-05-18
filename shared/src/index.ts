@@ -155,6 +155,31 @@ export interface GcMailItem {
 
 export interface GcMailList {
   items: GcMailItem[];
+  total?: number;
+}
+
+/** Frontend "viewing as" context state. Default identity is Charlie ('charlie'). */
+export interface ViewingAs {
+  alias: string;
+  /** True iff alias === 'charlie' (the sole identity that can send). */
+  isCharlie: boolean;
+}
+
+/**
+ * Compose payload — the SINGLE wire shape the mail-send router accepts.
+ * Architect (security_researcher td-wisp-eb0pn) explicit: no `from` field;
+ * server hardcodes the Charlie identity. Frontend cannot trick the server
+ * into sending as someone else because there's no slot in the shape.
+ */
+export interface MailComposeRequest {
+  to: string;
+  subject: string;
+  body: string;
+}
+
+export interface MailSendResult {
+  ok: true;
+  message_id?: string;
 }
 
 // ── Events (SSE; Phase C wires; type-locked early) ──────────────────────

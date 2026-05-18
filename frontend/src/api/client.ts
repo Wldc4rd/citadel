@@ -1,7 +1,10 @@
 import type {
   GcSession,
   GcBead,
+  GcMailItem,
   TranscriptResult,
+  MailComposeRequest,
+  MailSendResult,
   ApiError,
 } from 'thriva-admin-shared';
 
@@ -81,6 +84,20 @@ export const api = {
   },
   nudgeBead(id: string): Promise<{ ok: true; stdout: string }> {
     return request('POST', `/api/beads/${encodeURIComponent(id)}/nudge`, {});
+  },
+  listMail(box: 'inbox' | 'sent' | 'all', alias: string): Promise<{ items: GcMailItem[]; total?: number }> {
+    const qs = new URLSearchParams({ box, alias }).toString();
+    return request('GET', `/api/mail?${qs}`);
+  },
+  getThread(threadId: string, alias: string): Promise<{ items: GcMailItem[] }> {
+    const qs = new URLSearchParams({ alias }).toString();
+    return request('GET', `/api/mail/threads/${encodeURIComponent(threadId)}?${qs}`);
+  },
+  sendMail(payload: MailComposeRequest): Promise<MailSendResult> {
+    // The client-side shape mirrors the server's: { to, subject, body }.
+    // No `from` field. The architect's physical-separation rule means
+    // this fetch hits a different router than reads.
+    return request('POST', '/api/mail-send', payload);
   },
   health(): Promise<{ ok: boolean; ts: string }> {
     return request('GET', '/api/health');

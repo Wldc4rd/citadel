@@ -22,9 +22,15 @@ const BEAD_ID_RE = /^(td|th|jt)-[a-z0-9-]{3,32}$/;
 const AGENT_ALIAS_RE = /^[a-z][a-z0-9_./-]{1,63}$/i;
 
 function cleanEnv(): NodeJS.ProcessEnv {
+  const home = process.env.HOME ?? '/home/charlie';
+  // PATH explicitly includes ~/.local/bin because that's where `gc` lives
+  // on Charlie's machine. Override via THRIVA_ADMIN_PATH env if a future
+  // install moves it.
+  const path =
+    process.env.THRIVA_ADMIN_PATH ?? `${home}/.local/bin:/usr/local/bin:/usr/bin:/bin`;
   return {
-    PATH: '/usr/local/bin:/usr/bin:/bin',
-    HOME: process.env.HOME ?? '/home/charlie',
+    PATH: path,
+    HOME: home,
     LANG: 'C.UTF-8',
   };
 }
@@ -190,6 +196,41 @@ export async function execAgentNudge(alias: string): Promise<ExecResult> {
   await acquireSlot();
   try {
     return await runExec('gc', ['agents', 'nudge', alias], 10_000);
+  } finally {
+    releaseSlot();
+  }
+}
+
+// PHYSICAL SEPARATION (security_researcher td-wisp-eb0pn): mail-send is its
+// OWN wrapper, deliberately with NO `from` / `as` parameter in its
+// signature. The --from human pin is the SECOND belt — even if some
+// future caller tries to add a `from` arg, the function refuses it because
+// it isn't a parameter at all.
+//
+// `human` is gc's canonical wire identity for Charlie. The audit log
+// separately records `actor=charlie` (see audit.ts) — that's the
+// dashboard's internal accounting, distinct from gc's wire-level sender.
+export async function execMailSend(
+  to: string,
+  subject: string,
+  body: string,
+): Promise<ExecResult> {
+  if (!AGENT_ALIAS_RE.test(to)) {
+    throw new ExecError('invalid recipient alias', 'validation');
+  }
+  if (subject.length === 0 || subject.length > 200) {
+    throw new ExecError('subject must be 1–200 chars', 'validation');
+  }
+  if (body.length === 0 || body.length > 16 * 1024) {
+    throw new ExecError('body too short or too long', 'validation');
+  }
+  await acquireSlot();
+  try {
+    return await runExec(
+      'gc',
+      ['mail', 'send', to, '--from', 'human', '-s', subject, '-m', body],
+      10_000,
+    );
   } finally {
     releaseSlot();
   }

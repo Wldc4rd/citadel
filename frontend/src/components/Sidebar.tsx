@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import { useViewingAs } from '../contexts/ViewingAsContext';
 
 interface NavItem {
   to: string;
@@ -15,12 +16,20 @@ const NAV: NavItem[] = [
 ];
 
 export function Sidebar() {
+  const { viewingAs } = useViewingAs();
   return (
     <nav className="w-56 shrink-0 border-r border-ink-700 bg-ink-800 px-3 py-4 flex flex-col">
       <div className="px-2 mb-4">
         <p className="text-xs uppercase tracking-widest text-ink-300">thriva-dev</p>
         <p className="font-sans text-sm font-semibold text-ink-100">admin</p>
       </div>
+      {!viewingAs.isCharlie && (
+        <div className="px-2 py-1.5 mb-3 rounded-md border border-warn-500/40 bg-warn-500/10 text-warn-500 text-[11px]">
+          <span className="uppercase tracking-wider font-semibold block">viewing as</span>
+          <span className="block truncate">{viewingAs.alias}</span>
+          <span className="block text-[10px] text-warn-500/80 mt-0.5">read-only · reverts on tab hide</span>
+        </div>
+      )}
       <ul className="space-y-1 flex-1">
         {NAV.map((item) => (
           <li key={item.to}>
