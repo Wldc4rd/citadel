@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { GcMailItem, GcSession } from 'thriva-admin-shared';
+import type { GcMailItem, GcSession } from 'citadel-shared';
 import { api, ApiClientError } from '../api/client';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { GcMailItem } from 'thriva-admin-shared';
+import type { GcMailItem } from 'citadel-shared';
 import type { GcClient } from '../gc-client.js';
 import { recordAudit } from '../audit.js';
 

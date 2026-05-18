@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { GitCommit, GitView } from 'thriva-admin-shared';
+import type { GitCommit, GitView } from 'citadel-shared';
 import { execGitLog, ExecError } from '../exec.js';
 import { recordAudit } from '../audit.js';
 

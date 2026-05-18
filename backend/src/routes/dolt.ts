@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { DoltNomsTrend } from 'thriva-admin-shared';
+import type { DoltNomsTrend } from 'citadel-shared';
 import { recordAudit } from '../audit.js';
 
 // In-memory ring buffer of dolt-noms size samples — 24 h at 10-minute

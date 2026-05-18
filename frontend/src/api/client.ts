@@ -11,10 +11,10 @@ import type {
   SystemHealth,
   DoltNomsTrend,
   ApiError,
-} from 'thriva-admin-shared';
+} from 'citadel-shared';
 
 // Typed fetch client for the admin backend's /api/*. Shares types with
-// the backend via the workspace 'thriva-admin-shared' import so wire-shape
+// the backend via the workspace 'citadel-shared' import so wire-shape
 // drift produces compile errors instead of runtime undefined.
 
 const COOKIE_NAME = 'thriva_admin_csrf';

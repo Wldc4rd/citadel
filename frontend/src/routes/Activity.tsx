@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { DeployRecord, GitCommit, GitView } from 'thriva-admin-shared';
+import type { DeployRecord, GitCommit, GitView } from 'citadel-shared';
 import { api } from '../api/client';
 import { Button } from '../components/Button';
 import { Table, type TableColumn } from '../components/Table';

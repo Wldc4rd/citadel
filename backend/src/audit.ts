@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import type { AdminAuditEvent } from 'thriva-admin-shared';
+import type { AdminAuditEvent } from 'citadel-shared';
 
 // Audit log writer. Appends one JSON-per-line entry to .gc/events.jsonl —
 // the same durable channel gc uses, which survives dolt-hq corruption

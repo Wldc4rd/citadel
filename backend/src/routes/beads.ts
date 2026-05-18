@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { GcBead } from 'thriva-admin-shared';
+import type { GcBead } from 'citadel-shared';
 import type { GcClient } from '../gc-client.js';
 import { execBeadAction, ExecError } from '../exec.js';
 import { recordAudit } from '../audit.js';

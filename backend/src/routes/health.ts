@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import os from 'node:os';
-import type { SupervisorHealth, SystemHealth } from 'thriva-admin-shared';
+import type { SupervisorHealth, SystemHealth } from 'citadel-shared';
 import type { GcClient } from '../gc-client.js';
 import { recordAudit } from '../audit.js';
 

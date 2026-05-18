@@ -1,4 +1,4 @@
-# Architecture — thriva-admin-dashboard
+# Architecture — Citadel
 
 > The full design lives in the architect's bead block (`gc bd show td-1i30ih`). This file is the engineer's-eye summary of decisions that affect implementation.
 

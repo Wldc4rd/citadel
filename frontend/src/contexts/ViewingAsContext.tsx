@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { ViewingAs } from 'thriva-admin-shared';
+import type { ViewingAs } from 'citadel-shared';
 
 // Architect td-1i30ih §"Identity-switching for mail":
 //

@@ -4,7 +4,7 @@ import type {
   GcMailList,
   GcEventList,
   TranscriptTurn,
-} from 'thriva-admin-shared';
+} from 'citadel-shared';
 
 interface GcTranscriptResponse {
   id?: string;

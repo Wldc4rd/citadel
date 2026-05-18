@@ -1,8 +1,8 @@
 {
-  "name": "thriva-admin-dashboard",
+  "name": "citadel",
   "private": true,
   "version": "0.1.0",
-  "description": "Charlie-focused admin dashboard for the thriva-dev city. localhost-only, side-by-side with gc dashboard.",
+  "description": "Admin dashboard for Gas City orchestrations — built for a single operator running a single city.",
   "workspaces": [
     "shared",
     "backend",

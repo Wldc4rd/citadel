@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import fs from 'node:fs/promises';
-import type { DeployRecord, DeployStatus } from 'thriva-admin-shared';
+import type { DeployRecord, DeployStatus } from 'citadel-shared';
 import { recordAudit } from '../audit.js';
 
 const DEFAULT_LOG_PATH = '/home/charlie/thriva/.dev-deploy-log';

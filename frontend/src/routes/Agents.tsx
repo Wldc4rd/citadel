@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnsiUp } from 'ansi_up';
-import type { GcSession, TranscriptResult, TranscriptTurn } from 'thriva-admin-shared';
+import type { GcSession, TranscriptResult, TranscriptTurn } from 'citadel-shared';
 import { api, ApiClientError } from '../api/client';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';

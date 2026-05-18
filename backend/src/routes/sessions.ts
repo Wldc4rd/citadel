@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { TranscriptResult, TranscriptTurn } from 'thriva-admin-shared';
+import type { TranscriptResult, TranscriptTurn } from 'citadel-shared';
 import type { GcClient } from '../gc-client.js';
 import { sanitiseTerminalOutput } from '../exec.js';
 import { recordAudit } from '../audit.js';

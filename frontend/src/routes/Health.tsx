@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { DoltNomsTrend, SystemHealth } from 'thriva-admin-shared';
+import type { DoltNomsTrend, SystemHealth } from 'citadel-shared';
 import { api } from '../api/client';
 import { Button } from '../components/Button';
 

@@ -1,6 +1,6 @@
 [Unit]
-Description=Thriva admin dashboard (localhost-only, port 8081)
-Documentation=file:///home/charlie/thriva-dev/tools/admin-dashboard/docs/ARCHITECTURE.md
+Description=Citadel — admin dashboard for Gas City (localhost-only, port 8081)
+Documentation=file:///home/charlie/citadel/docs/ARCHITECTURE.md
 After=network-online.target
 Wants=network-online.target
 
@@ -8,17 +8,17 @@ Wants=network-online.target
 Type=simple
 User=charlie
 Group=charlie
-WorkingDirectory=/home/charlie/thriva-dev/tools/admin-dashboard
+WorkingDirectory=/home/charlie/citadel
 Environment=NODE_ENV=production
 Environment=PORT=8081
 Environment=GC_SUPERVISOR_URL=http://127.0.0.1:8372
 Environment=GC_CITY_NAME=thriva-dev
 Environment=ADMIN_AUDIT_LOG_PATH=/home/charlie/thriva-dev/.gc/events.jsonl
-Environment=ADMIN_FRONTEND_DIST=/home/charlie/thriva-dev/tools/admin-dashboard/frontend/dist
+Environment=ADMIN_FRONTEND_DIST=/home/charlie/citadel/frontend/dist
 # Refuse to start if a stale process holds the port. Bound to 127.0.0.1
 # only, so the lsof check is sufficient — no public-interface race.
 ExecStartPre=/bin/sh -c '! ss -tln "sport = :8081" | grep -q LISTEN || (echo "port 8081 already bound" >&2; exit 1)'
-ExecStart=/usr/bin/node /home/charlie/thriva-dev/tools/admin-dashboard/backend/dist/server.js
+ExecStart=/usr/bin/node /home/charlie/citadel/backend/dist/server.js
 Restart=on-failure
 RestartSec=3
 StandardOutput=journal
@@ -27,7 +27,7 @@ StandardError=journal
 # .gc/events.jsonl, runs `gc` CLI. No FS writes outside the worktree.
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/home/charlie/thriva-dev/.gc /home/charlie/thriva-dev/tools/admin-dashboard
+ReadWritePaths=/home/charlie/thriva-dev/.gc /home/charlie/citadel
 ProtectHome=read-only
 PrivateTmp=true
 PrivateDevices=true
