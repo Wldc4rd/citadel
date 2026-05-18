@@ -117,4 +117,4 @@ Built for a specific way of running a gc city. Parameterized via env vars so it 
 
 ## License
 
-Not yet licensed. All rights reserved by default until that changes. Open an issue if you want to use it before then.
+[MIT](LICENSE) © 2026 Charlie Coutts
