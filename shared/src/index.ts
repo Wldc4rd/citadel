@@ -125,6 +125,8 @@ export interface GcBead {
 
 export interface GcBeadList {
   items: GcBead[];
+  /** gc supervisor's own total count for the requested scope (independent of the fetch limit). */
+  total?: number;
 }
 
 /** Frontend-side filter contract. v0 hardcodes; ?showAll=1 disables. */

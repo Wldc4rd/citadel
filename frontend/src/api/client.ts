@@ -70,6 +70,7 @@ export class ApiClientError extends Error {
   }
 }
 
+
 export const api = {
   listSessions(): Promise<{ items: GcSession[] }> {
     return request('GET', '/api/sessions');
@@ -77,7 +78,13 @@ export const api = {
   peekSession(id: string): Promise<TranscriptResult> {
     return request('POST', `/api/sessions/${encodeURIComponent(id)}/peek`, {});
   },
-  listBeads(showAll?: boolean): Promise<{ items: GcBead[]; total: number; returned: number }> {
+  listBeads(showAll?: boolean): Promise<{
+    items: GcBead[];
+    total: number;
+    upstream_total?: number;
+    upstream_fetched?: number;
+    fetch_limit?: number;
+  }> {
     const qs = showAll ? '?showAll=1' : '';
     return request('GET', `/api/beads${qs}`);
   },

@@ -9,7 +9,12 @@ import { recordAudit } from '../audit.js';
 
 const ALIAS_RE = /^[a-z][a-z0-9_./-]{1,63}$/i;
 const BOX_VALUES = new Set(['inbox', 'sent', 'all']);
-const FETCH_LIMIT = 500;
+// td-7t24i6 scope expansion: gc supervisor's mail endpoint defaults to
+// limit=50 and caps at 1000 (verified — limit=2000 returns 1000). 1000 is
+// the practical max. For the current corpus (~1167 mails) this covers
+// ~86% which is enough for the common alias-filtered case; pagination
+// would need a separate v1 design if the corpus grows past 2-3× this.
+const FETCH_LIMIT = 1000;
 
 export function mailRouter(gc: GcClient): Router {
   const router = Router();

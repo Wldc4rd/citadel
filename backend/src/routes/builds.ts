@@ -5,6 +5,10 @@ import { recordAudit } from '../audit.js';
 
 const DEFAULT_LOG_PATH = '/home/charlie/thriva/.dev-deploy-log';
 const DEFAULT_MARKER_PATH = '/home/charlie/thriva/.dev-deploy-FAILED';
+// td-7t24i6 scope expansion: builds list was already capped here, but at
+// 200 records that's ~30 days at typical dev-deploy cadence — fine for the
+// "recent activity" use case. Documented so the cap is intentional and not
+// the same undercount bug.
 const MAX_RECORDS = 200;
 
 // Format of the lines we parse — written by /home/charlie/thriva/scripts/dev-deploy.sh:

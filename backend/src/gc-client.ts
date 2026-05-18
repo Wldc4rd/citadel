@@ -57,8 +57,21 @@ export class GcClient {
     return this.getJson<GcSessionList>(this.cityPath('/sessions'), signal);
   }
 
-  async listBeads(signal?: AbortSignal): Promise<GcBeadList> {
-    return this.getJson<GcBeadList>(this.cityPath('/beads'), signal);
+  async listBeads(
+    signal?: AbortSignal,
+    params?: { limit?: number },
+  ): Promise<GcBeadList> {
+    // td-7t24i6 (Charlie's corrected diagnosis): gc supervisor defaults
+    // /beads to limit=50, which is far below the city's working set
+    // (~2139 total, ~183 eng-only). The client-side spam filter then
+    // operates on a 50-item window and Charlie sees an undercount.
+    // Pass an explicit large limit to cover the working set; the spam
+    // filter shrinks back down on the client side.
+    const search = new URLSearchParams();
+    if (params?.limit) search.set('limit', String(params.limit));
+    const qs = search.toString();
+    const path = `/beads${qs.length > 0 ? `?${qs}` : ''}`;
+    return this.getJson<GcBeadList>(this.cityPath(path), signal);
   }
 
   async listMail(

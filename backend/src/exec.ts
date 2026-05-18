@@ -239,19 +239,24 @@ export async function execMailSend(
 // Hardcoded enum of `git log` invocations. Each view's args live entirely
 // in this file — Charlie cannot pass arbitrary git arguments to the
 // server. The caller can only pick a view *name* (validated upstream).
+// td-7t24i6 scope expansion: git log views previously capped at -n 50 in
+// recent-main / recent-all, same undercount risk. Recent-main bumped to
+// 200 (matches main's typical commit frequency * ~2 weeks); recent-all
+// bumped to 200 too. The since= variants are time-windowed, not count-
+// windowed, so no explicit cap needed — git's default for those is fine.
 const GIT_LOG_VIEWS: Record<string, string[]> = {
   'recent-main': [
     'log',
     '--pretty=format:%H%x09%h%x09%an%x09%aI%x09%D%x09%s',
     '-n',
-    '50',
+    '200',
     'origin/main',
   ],
   'recent-all': [
     'log',
     '--pretty=format:%H%x09%h%x09%an%x09%aI%x09%D%x09%s',
     '-n',
-    '50',
+    '200',
     '--branches',
     '--remotes',
   ],

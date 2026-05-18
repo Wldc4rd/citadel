@@ -22,15 +22,32 @@ function defaultBeadFilter(bead: GcBead): boolean {
 
 const BEAD_ID_RE = /^(td|th|jt)-[a-z0-9-]{3,32}$/;
 
+// td-7t24i6 fix: gc default /beads limit is 50, far below the city's working
+// set (~2139 total, ~183 eng-only). Pull a wide window so the spam filter
+// operates on the full set, not a 50-item slice. 1000 is well over the
+// current ~183-item eng-only count and leaves headroom; safety cap in case
+// the supervisor returns more.
+const BEADS_FETCH_LIMIT = 1000;
+
 export function beadsRouter(gc: GcClient): Router {
   const router = Router();
 
   router.get('/', async (req, res) => {
     try {
-      const { items } = await gc.listBeads();
+      const { items, total } = await gc.listBeads(undefined, { limit: BEADS_FETCH_LIMIT });
       const showAll = req.query.showAll === '1';
       const filtered = showAll ? items : items.filter(defaultBeadFilter);
-      res.json({ items: filtered, total: items.length, returned: filtered.length });
+      res.json({
+        items: filtered,
+        total: filtered.length,
+        // upstream_total: the store's total bead count (per gc's `total`
+        // field). Diff between upstream_total and items.length tells the UI
+        // how much was truncated by our fetch limit so Charlie can see when
+        // the window isn't covering everything.
+        upstream_total: typeof total === 'number' ? total : undefined,
+        upstream_fetched: items.length,
+        fetch_limit: BEADS_FETCH_LIMIT,
+      });
     } catch (err) {
       res
         .status(502)
