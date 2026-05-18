@@ -5,7 +5,7 @@ import fs from 'node:fs';
 
 import { loadConfig } from './config.js';
 import {
-  hostHeaderAllowlist,
+  hostHeaderAllowlistFactory,
   originCheck,
   securityHeaders,
 } from './middleware/security.js';
@@ -38,8 +38,8 @@ function main(): void {
   app.use(express.json({ limit: '64kb' }));
 
   // ── Security middleware (V0-SHIP-REQUIRED) ────────────────────────────
-  app.use(hostHeaderAllowlist);
-  app.use(originCheck(config.port));
+  app.use(hostHeaderAllowlistFactory(config.extraAllowedHosts));
+  app.use(originCheck(config.port, config.extraAllowedHosts));
   // CSP connect-src extension: Phase C wires EventSource direct to gc
   // supervisor for /events/stream. Different port = different origin under
   // same-origin policy, so the supervisor URL must be explicitly enumerated.

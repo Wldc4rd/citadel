@@ -3,10 +3,10 @@ import type { Request, Response, NextFunction } from 'express';
 // DNS-rebinding defense + clickjacking defense + content-type lockdown.
 // security_researcher td-wisp-eb0pn — all V0-SHIP-REQUIRED.
 
-const ALLOWED_HOSTS = new Set([
-  '127.0.0.1',
-  'localhost',
-]);
+// Always-allowed floor. Extra hosts (e.g. LAN names like 'thriva-dev' or
+// '192.168.1.58') are added at runtime via hostHeaderAllowlistFactory() —
+// see td-9u9im9 for the headless-VM workflow this supports.
+const ALLOWED_HOSTS_FLOOR: ReadonlyArray<string> = ['127.0.0.1', 'localhost'];
 
 function originHost(value: string | undefined): string | null {
   if (!value) return null;
@@ -25,21 +25,31 @@ function hostnameOnly(host: string | undefined): string | null {
   return noPort.replace(/^\[|\]$/g, '').toLowerCase();
 }
 
-export function hostHeaderAllowlist(req: Request, res: Response, next: NextFunction): void {
-  const host = hostnameOnly(req.headers.host);
-  if (host === null || !ALLOWED_HOSTS.has(host)) {
-    // 421 Misdirected Request — semantically right for DNS-rebinding.
-    res.status(421).type('text/plain').send('Host not allowed');
-    return;
-  }
-  next();
+export function hostHeaderAllowlistFactory(extraAllowedHosts: ReadonlyArray<string> = []) {
+  const allowed = new Set<string>(ALLOWED_HOSTS_FLOOR);
+  for (const h of extraAllowedHosts) allowed.add(h.toLowerCase());
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const host = hostnameOnly(req.headers.host);
+    if (host === null || !allowed.has(host)) {
+      // 421 Misdirected Request — semantically right for DNS-rebinding.
+      res.status(421).type('text/plain').send('Host not allowed');
+      return;
+    }
+    next();
+  };
 }
 
-export function originCheck(port: number) {
-  const allowedOrigins = new Set([
+// Back-compat: existing callers that don't pass extras get floor-only.
+export const hostHeaderAllowlist = hostHeaderAllowlistFactory();
+
+export function originCheck(port: number, extraAllowedHosts: ReadonlyArray<string> = []) {
+  const allowedOrigins = new Set<string>([
     `http://127.0.0.1:${port}`,
     `http://localhost:${port}`,
   ]);
+  for (const h of extraAllowedHosts) {
+    allowedOrigins.add(`http://${h.toLowerCase()}:${port}`);
+  }
   return (req: Request, res: Response, next: NextFunction): void => {
     // Only check state-changing methods. GETs are exempt — the host-header
     // allowlist already covers DNS-rebinding for read paths.
