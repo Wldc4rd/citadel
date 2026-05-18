@@ -26,6 +26,16 @@ export interface GcClientOptions {
 export class GcClient {
   constructor(private readonly opts: GcClientOptions) {}
 
+  /** Base URL of the gc supervisor (no trailing slash). Used for non-city endpoints (e.g. /v0/health) + frontend CSP connect-src. */
+  get baseUrl(): string {
+    return this.opts.baseUrl;
+  }
+
+  /** City name this client is scoped to. */
+  get cityName(): string {
+    return this.opts.cityName;
+  }
+
   private cityPath(suffix: string): string {
     const url = `${this.opts.baseUrl}/v0/city/${encodeURIComponent(this.opts.cityName)}${suffix}`;
     return url;

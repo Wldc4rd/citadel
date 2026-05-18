@@ -5,6 +5,11 @@ import type {
   TranscriptResult,
   MailComposeRequest,
   MailSendResult,
+  GitCommitList,
+  GitView,
+  DeployList,
+  SystemHealth,
+  DoltNomsTrend,
   ApiError,
 } from 'thriva-admin-shared';
 
@@ -101,5 +106,17 @@ export const api = {
   },
   health(): Promise<{ ok: boolean; ts: string }> {
     return request('GET', '/api/health');
+  },
+  listCommits(view: GitView): Promise<GitCommitList> {
+    return request('GET', `/api/git/commits?view=${encodeURIComponent(view)}`);
+  },
+  listBuilds(): Promise<DeployList> {
+    return request('GET', '/api/builds');
+  },
+  systemHealth(): Promise<SystemHealth> {
+    return request('GET', '/api/system/system');
+  },
+  doltTrend(): Promise<DoltNomsTrend> {
+    return request('GET', '/api/dolt-noms/trend');
   },
 };

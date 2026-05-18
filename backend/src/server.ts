@@ -15,6 +15,10 @@ import { sessionsRouter } from './routes/sessions.js';
 import { beadsRouter } from './routes/beads.js';
 import { mailRouter } from './routes/mail.js';
 import { mailSendRouter } from './routes/mail-send.js';
+import { gitRouter } from './routes/git.js';
+import { buildsRouter } from './routes/builds.js';
+import { healthRouter } from './routes/health.js';
+import { doltRouter, startDoltNomsSampler } from './routes/dolt.js';
 import { setAuditLogPath } from './audit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -36,7 +40,10 @@ function main(): void {
   // ── Security middleware (V0-SHIP-REQUIRED) ────────────────────────────
   app.use(hostHeaderAllowlist);
   app.use(originCheck(config.port));
-  app.use(securityHeaders);
+  // CSP connect-src extension: Phase C wires EventSource direct to gc
+  // supervisor for /events/stream. Different port = different origin under
+  // same-origin policy, so the supervisor URL must be explicitly enumerated.
+  app.use(securityHeaders([config.gcSupervisorUrl]));
   app.use(csrfIssueCookie);
 
   // ── Health check (no CSRF, no privileged access) ──────────────────────
@@ -63,8 +70,29 @@ function main(): void {
   // mail-send.ts has no `viewing-as` parameter — physical separation per
   // architect th-1i30ih §"Identity-switching for mail".
   writeRouter.use('/mail-send', mailSendRouter());
+  // Phase C: Activity + Health surface.
+  writeRouter.use('/git', gitRouter());
+  writeRouter.use('/builds', buildsRouter());
+  writeRouter.use('/system', healthRouter(gc));
+  writeRouter.use('/dolt-noms', doltRouter());
 
   app.use('/api', writeRouter);
+
+  // Frontend needs to know the gc supervisor URL to open EventSource
+  // direct (architect addendum td-wisp-ijk7g). The CSP already allows
+  // it; this endpoint is the one place that surfaces it to the browser
+  // so the URL isn't hardcoded in two places.
+  app.get('/api/config/gc-supervisor', (_req, res) => {
+    res.json({
+      supervisor_url: config.gcSupervisorUrl,
+      city: config.cityName,
+    });
+  });
+
+  // Start the dolt-noms 10-min sampler. The actual metric source is
+  // pending mechanic surgical-ask; the sampler is wired so the ring
+  // buffer starts filling the moment the source lands.
+  startDoltNomsSampler();
 
   // ── Frontend static files (prod) ──────────────────────────────────────
   const distDir = path.resolve(__dirname, '..', config.frontendDistPath);

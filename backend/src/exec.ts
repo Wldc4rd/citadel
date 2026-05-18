@@ -236,4 +236,54 @@ export async function execMailSend(
   }
 }
 
+// Hardcoded enum of `git log` invocations. Each view's args live entirely
+// in this file — Charlie cannot pass arbitrary git arguments to the
+// server. The caller can only pick a view *name* (validated upstream).
+const GIT_LOG_VIEWS: Record<string, string[]> = {
+  'recent-main': [
+    'log',
+    '--pretty=format:%H%x09%h%x09%an%x09%aI%x09%D%x09%s',
+    '-n',
+    '50',
+    'origin/main',
+  ],
+  'recent-all': [
+    'log',
+    '--pretty=format:%H%x09%h%x09%an%x09%aI%x09%D%x09%s',
+    '-n',
+    '50',
+    '--branches',
+    '--remotes',
+  ],
+  today: [
+    'log',
+    '--pretty=format:%H%x09%h%x09%an%x09%aI%x09%D%x09%s',
+    '--since=24.hours.ago',
+    '--branches',
+    '--remotes',
+  ],
+  'this-week': [
+    'log',
+    '--pretty=format:%H%x09%h%x09%an%x09%aI%x09%D%x09%s',
+    '--since=7.days.ago',
+    '--branches',
+    '--remotes',
+  ],
+};
+
+const GIT_REPO_PATH = process.env.THRIVA_ADMIN_GIT_REPO ?? '/home/charlie/thriva';
+
+export async function execGitLog(view: string): Promise<ExecResult> {
+  const args = GIT_LOG_VIEWS[view];
+  if (!args) {
+    throw new ExecError('unknown git view', 'validation');
+  }
+  await acquireSlot();
+  try {
+    return await runExec('git', ['-C', GIT_REPO_PATH, ...args], 10_000);
+  } finally {
+    releaseSlot();
+  }
+}
+
 export { sanitiseTerminalOutput };

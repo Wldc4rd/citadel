@@ -182,6 +182,89 @@ export interface MailSendResult {
   message_id?: string;
 }
 
+// ── Activity view: commits + builds (Phase C) ─────────────────────────────
+
+/** One of the hardcoded git log "views". The backend enum is the auth boundary — strings outside this set are rejected. */
+export type GitView = 'recent-main' | 'recent-all' | 'today' | 'this-week';
+
+export interface GitCommit {
+  sha: string;
+  short_sha: string;
+  author: string;
+  date: IsoTimestamp;
+  subject: string;
+  /** Optional refs/branches that point at this commit, e.g. "HEAD -> main". */
+  refs?: string;
+}
+
+export interface GitCommitList {
+  view: GitView;
+  items: GitCommit[];
+}
+
+export type DeployStatus = 'ok' | 'failed' | 'in-progress' | 'unknown';
+
+export interface DeployRecord {
+  at: IsoTimestamp;
+  status: DeployStatus;
+  /** "old-sha -> new-sha" when status=ok, "stage: X" when failed, raw line otherwise. */
+  detail: string;
+}
+
+export interface DeployList {
+  items: DeployRecord[];
+  /** Path the backend parsed; null when the file isn't present. */
+  source: string | null;
+  /** True if .dev-deploy-FAILED marker is currently present. */
+  failed_marker: boolean;
+}
+
+// ── Health view (Phase C) ─────────────────────────────────────────────────
+
+export interface SystemHealth {
+  /** Backend process state — totally local to the admin dashboard's node process. */
+  admin: {
+    pid: number;
+    uptime_sec: number;
+    rss_bytes: number;
+    heap_used_bytes: number;
+    node_version: string;
+  };
+  /** Machine-level state from Node's os module. */
+  host: {
+    load_avg_1: number;
+    load_avg_5: number;
+    load_avg_15: number;
+    total_mem_bytes: number;
+    free_mem_bytes: number;
+    /** Number of logical CPUs. */
+    cpu_count: number;
+    uptime_sec: number;
+  };
+  /** gc supervisor's own /v0/health response, when reachable. */
+  supervisor: SupervisorHealth | null;
+}
+
+export interface SupervisorHealth {
+  status: string;
+  version: string;
+  city: string;
+  uptime_sec: number;
+}
+
+export interface DoltNomsSample {
+  ts: IsoTimestamp;
+  bytes: number;
+}
+
+export interface DoltNomsTrend {
+  /** Up to 144 samples (24 h at 10-min cadence). */
+  samples: DoltNomsSample[];
+  /** Null when the metric source isn't wired yet (mechanic surgical-ask td-ulgrt6). */
+  source: string | null;
+  available: boolean;
+}
+
 // ── Events (SSE; Phase C wires; type-locked early) ──────────────────────
 
 export interface GcEvent {

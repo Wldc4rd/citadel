@@ -70,6 +70,6 @@ For the systemd-managed install, see [deploy/README.md](deploy/README.md).
 
 | Phase | Scope | Status |
 |---|---|---|
-| A | Skeleton + Agents + Beads | ✅ this commit |
-| B | Mail with identity-switching | pending |
-| C | Activity + Health + SSE wiring | pending |
+| A | Skeleton + Agents + Beads | ✅ |
+| B | Mail with identity-switching | ✅ |
+| C | Activity + Health + direct-EventSource SSE | ✅ this commit |

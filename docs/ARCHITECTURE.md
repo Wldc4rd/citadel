@@ -14,7 +14,7 @@ Rejected alternatives:
 - **Go** — wrong coupling direction (admin tool shouldn't carry gc-the-orchestrator's lang dep).
 - **Direct-from-frontend (no backend)** — doesn't work; peek + git + system-health need shell-exec.
 
-## Real-time: direct EventSource against gc
+## Real-time: direct EventSource against gc (Phase C — ✅ shipped)
 
 Architect addendum **td-wisp-ijk7g** (mechanic td-wisp-e1v14) corrected the earlier reading: `/v0/city/{name}/events/stream` IS SSE today (the `/stream` suffix; the previous probe missed it). gc supervisor also serves a permissive CORS policy that echoes the request `Origin`, so the browser can `new EventSource(...)` directly against it.
 
@@ -22,10 +22,19 @@ What this collapses:
 
 - No backend cursor-poll indirection.
 - No backend-emitted SSE wrapper.
-- Phase C wires `EventSource` from the frontend straight to `http://127.0.0.1:8372/v0/city/thriva-dev/events/stream`, with `Last-Event-ID` for resume.
+- `frontend/src/hooks/useGcEvents.ts::useGcEventRefresh(prefixes, onMatch)` opens an `EventSource` directly against `http://127.0.0.1:8372/v0/city/thriva-dev/events/stream`, with `?after=<lastEventId>` for resume on reconnect, and exponential-backoff retry capped at 30 s.
+- The backend exposes `/api/config/gc-supervisor` so the frontend gets the supervisor URL from one source of truth (no hardcoding in two places).
+- Agents page subscribes to `session.*` events → table refreshes live. Beads page subscribes to `bead.*` events → table refreshes live. Both pages show a small `live` / `connecting` / `offline` pill so the SSE state is visible.
 - Belt-and-braces still applies: every panel has a manual Refresh button for the tab-sleep / laptop-close case.
 
-**Phase A** ships poll-on-mount + manual refresh only; SSE direct-from-browser lands in Phase C.
+## Activity + Health (Phase C — ✅ shipped)
+
+- **Activity** (`/activity`): hardcoded git-log "view" enum (`recent-main`, `recent-all`, `today`, `this-week`) on `/api/git/commits?view=<enum>`. The args list lives entirely in `exec.ts::GIT_LOG_VIEWS` — the user picks a view name, not git args. `git log` runs against `/home/charlie/thriva` (overridable via `THRIVA_ADMIN_GIT_REPO`). `/api/builds` parses `/home/charlie/thriva/.dev-deploy-log` line-by-line, classifying each entry into `ok`/`failed`/`in-progress`/`unknown` and surfacing the `.dev-deploy-FAILED` marker as a banner pill.
+- **Health** (`/health`): three cards — admin process state (pid/uptime/rss/heap/node version), host state (cpus, 1/5/15 load, mem free, host uptime), gc supervisor's own `/v0/city/{name}/health` response (status/version/uptime). 30 s auto-refresh while tab is visible. Below the cards: a dolt-noms 24 h trend sparkline pulled from `/api/dolt-noms/trend`.
+
+## Dolt-noms ring buffer
+
+The ring buffer scaffolding is wired (`backend/src/routes/dolt.ts`): 144 slots, 10-minute sampling cadence. The actual metric source (`sampleDoltNomsSize()`) is a stub — mechanic surgical-ask is filed for "expose a dolt-noms metric endpoint or document where to read the disk size." Until that lands, `/api/dolt-noms/trend` returns `{samples: [], available: false, source: null}` and the Health page renders a calm "metric source pending" panel instead of fake zeros. Once mechanic ships the source, the only code change is swapping `sampleDoltNomsSize()` — the endpoint shape doesn't move.
 
 ## Peek is HTTP, not shell-exec
 

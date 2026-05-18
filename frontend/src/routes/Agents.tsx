@@ -5,6 +5,7 @@ import { api, ApiClientError } from '../api/client';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
 import { Table, type TableColumn } from '../components/Table';
+import { useGcEventRefresh } from '../hooks/useGcEvents';
 
 const PROMPT_INJECTION_NOTICE =
   'Content is agent-generated and may contain misleading instructions.';
@@ -43,6 +44,12 @@ export function AgentsPage() {
     }, 15_000);
     return () => clearInterval(tick);
   }, []);
+
+  // Phase C: live updates from gc supervisor's SSE stream. When the
+  // supervisor emits any session.* event, refetch the table. Falls back
+  // silently if the stream disconnects — the manual Refresh button is
+  // the user-controlled escape valve per architect's design.
+  const sseState = useGcEventRefresh(['session.'], () => void refresh());
 
   const handlePeek = useCallback(async (session: GcSession) => {
     setPeekFor(session);
@@ -161,6 +168,7 @@ export function AgentsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <SseIndicator state={sseState} />
           {error && <span className="text-xs text-error-500">{error}</span>}
           <Button size="sm" onClick={() => void refresh()} disabled={loading}>
             {loading ? 'Refreshing…' : 'Refresh'}
@@ -299,6 +307,25 @@ function formatChars(n: number): string {
   if (n < 1024) return `${n}`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function SseIndicator({ state }: { state: 'connecting' | 'open' | 'closed' }) {
+  const tone =
+    state === 'open'
+      ? 'bg-accent-700/30 text-accent-500 border-accent-700/40'
+      : state === 'connecting'
+        ? 'bg-warn-500/20 text-warn-500 border-warn-500/30'
+        : 'bg-error-500/20 text-error-500 border-error-500/30';
+  const label = state === 'open' ? 'live' : state === 'connecting' ? 'connecting' : 'offline';
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${tone}`}
+      title={`SSE stream: ${state}`}
+    >
+      <span aria-hidden className={`w-1.5 h-1.5 rounded-full ${state === 'open' ? 'bg-accent-500 animate-pulse' : 'bg-current'}`} />
+      {label}
+    </span>
+  );
 }
 
 function StatePill({

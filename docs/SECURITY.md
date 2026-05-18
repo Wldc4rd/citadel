@@ -10,6 +10,7 @@ The product runs on Charlie's laptop, on `127.0.0.1`, with no auth. That is **no
 - **Host header allowlist** (DNS rebinding defense). `middleware/security.ts::hostHeaderAllowlist`. Allowed: `127.0.0.1`, `localhost` (with optional port). Anything else → **HTTP 421 Misdirected Request**.
 - **Origin header check** on state-changing endpoints. Must be `http://127.0.0.1:<port>` or `http://localhost:<port>`. Anything else → **HTTP 403**.
 - **IPv6 posture**: Node's `app.listen('127.0.0.1', …)` binds IPv4 only, so `::1` is naturally refused.
+- **CSP `connect-src` includes the gc supervisor URL.** Phase C wires `EventSource` from the browser directly to `http://127.0.0.1:8372/v0/city/{name}/events/stream`. Different port = different origin, so the supervisor URL must be explicitly enumerated. The middleware factory takes an `extraConnectSrc` array; the server passes `[config.gcSupervisorUrl]` at boot. Anything else attempting to call out from the page fails the CSP — `'self'` covers the dashboard's own API, the extras list covers the supervisor.
 
 ### Invariants
 

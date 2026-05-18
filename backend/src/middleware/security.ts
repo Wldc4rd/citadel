@@ -58,26 +58,28 @@ export function originCheck(port: number) {
   };
 }
 
-export function securityHeaders(req: Request, res: Response, next: NextFunction): void {
-  // Defeat clickjacking + iframe-embedding.
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Referrer-Policy', 'no-referrer');
-  // Per security_researcher: strict CSP, no inline script, no eval, no foreign frames.
-  res.setHeader(
-    'Content-Security-Policy',
-    [
-      "default-src 'self'",
-      "script-src 'self'",
-      // Tailwind / Vite produce inline styles in dev; allow unsafe-inline only for style.
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data:",
-      "connect-src 'self'",
-      "object-src 'none'",
-      "frame-ancestors 'none'",
-      "base-uri 'none'",
-      "form-action 'self'",
-    ].join('; '),
-  );
-  next();
+export function securityHeaders(extraConnectSrc: ReadonlyArray<string> = []) {
+  // Phase C addendum td-wisp-ijk7g: the browser opens an EventSource
+  // directly against gc supervisor at a different origin (different port).
+  // CSP connect-src must enumerate the supervisor URL explicitly — 'self'
+  // would not cover http://127.0.0.1:8372. Pass the gc base URL in here.
+  const connectSrc = ["'self'", ...extraConnectSrc].join(' ');
+  const csp = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    `connect-src ${connectSrc}`,
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+  ].join('; ');
+  return (_req: Request, res: Response, next: NextFunction): void => {
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Content-Security-Policy', csp);
+    next();
+  };
 }

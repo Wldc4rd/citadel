@@ -4,6 +4,7 @@ import { api, ApiClientError } from '../api/client';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
 import { Table, type TableColumn } from '../components/Table';
+import { useGcEventRefresh } from '../hooks/useGcEvents';
 
 export function BeadsPage() {
   const [rows, setRows] = useState<GcBead[]>([]);
@@ -36,6 +37,9 @@ export function BeadsPage() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Phase C: live updates when supervisor emits bead.*
+  useGcEventRefresh(['bead.'], () => void refresh());
 
   const runAction = useCallback(
     async (
