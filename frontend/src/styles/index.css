@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  body {
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+}
+
+@layer components {
+  /* Common utility classes for dense admin UI. */
+  .panel {
+    @apply rounded-lg border border-ink-600 bg-ink-800;
+  }
+  .panel-header {
+    @apply flex items-center justify-between gap-3 px-4 py-2 border-b border-ink-600;
+  }
+  .panel-body {
+    @apply p-4;
+  }
+  /* ansi_up renders foreground colors as inline <span class="ansi-...">. */
+  .ansi-black { color: #2e3440; }
+  .ansi-red { color: #f47174; }
+  .ansi-green { color: #7ee787; }
+  .ansi-yellow { color: #f2c965; }
+  .ansi-blue { color: #79c0ff; }
+  .ansi-magenta { color: #d2a8ff; }
+  .ansi-cyan { color: #a5e3e3; }
+  .ansi-white { color: #cdd4ea; }
+  .ansi-bright-red { color: #ff8888; font-weight: 600; }
+  .ansi-bright-green { color: #9be9a8; font-weight: 600; }
+  .ansi-bright-yellow { color: #ffd97a; font-weight: 600; }
+  .ansi-bright-blue { color: #95cdff; font-weight: 600; }
+  .ansi-bright-magenta { color: #e0bbff; font-weight: 600; }
+  .ansi-bright-cyan { color: #b8ecec; font-weight: 600; }
+  .ansi-bright-white { color: #ffffff; font-weight: 600; }
+}

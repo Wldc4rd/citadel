@@ -1,0 +1,24 @@
+{
+  "name": "thriva-admin-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Charlie-focused admin dashboard for the thriva-dev city. localhost-only, side-by-side with gc dashboard.",
+  "workspaces": [
+    "shared",
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "build:shared": "npm --workspace shared run build",
+    "build:backend": "npm --workspace backend run build",
+    "build:frontend": "npm --workspace frontend run build",
+    "build": "npm run build:shared && npm run build:backend && npm run build:frontend",
+    "dev:backend": "npm --workspace backend run dev",
+    "dev:frontend": "npm --workspace frontend run dev",
+    "start": "node backend/dist/server.js",
+    "typecheck": "npm --workspace shared run typecheck && npm --workspace backend run typecheck && npm --workspace frontend run typecheck"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
