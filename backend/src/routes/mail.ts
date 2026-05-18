@@ -9,6 +9,7 @@ import { recordAudit } from '../audit.js';
 
 const ALIAS_RE = /^[a-z][a-z0-9_./-]{1,63}$/i;
 const BOX_VALUES = new Set(['inbox', 'sent', 'all']);
+const FETCH_LIMIT = 500;
 
 export function mailRouter(gc: GcClient): Router {
   const router = Router();
@@ -21,19 +22,31 @@ export function mailRouter(gc: GcClient): Router {
       ? (rawBox as 'inbox' | 'sent' | 'all')
       : 'inbox';
     try {
-      const { items, total } = await gc.listMail(undefined, {
-        box: box === 'all' ? undefined : box,
-        alias,
-      });
-      // Honest cache control — every fetch is request-scoped; never persisted
-      // client-side under an as-identity (security_researcher).
+      // td-h3n2ar fix: gc supervisor's `box` + `alias` query params are
+      // silently ignored upstream (verified: box=sent&alias=mayor and
+      // box=sent&alias=human both return the same first items with
+      // to=mayor). So we can't lean on the supervisor to filter by sender.
+      //
+      // Pull a wide window and filter server-side: inbox = to===alias,
+      // sent = from===alias. Filtering here keeps each box's results
+      // independent under as-identity switching, which is what Charlie
+      // actually wants from the UI.
+      const { items: rawItems } = await gc.listMail(undefined, { limit: FETCH_LIMIT });
+      const filtered = filterByBox(rawItems, box, alias);
+      // Newest first — td-liky3d default sort, applied at the source so
+      // the API contract is stable independent of any table sort UI.
+      filtered.sort((a, b) => b.created_at.localeCompare(a.created_at));
       res.setHeader('Cache-Control', 'no-store');
-      res.json({ items, total });
+      res.json({
+        items: filtered,
+        total: filtered.length,
+        upstream_total: rawItems.length,
+      });
       void recordAudit({
         type: 'dashboard.fetch',
         endpoint: 'GET /api/mail',
         viewing_as: alias,
-        parsed_args: { box, alias },
+        parsed_args: { box, alias, returned: String(filtered.length) },
         duration_ms: 0,
       });
     } catch (err) {
@@ -87,4 +100,20 @@ export function mailRouter(gc: GcClient): Router {
   });
 
   return router;
+}
+
+function filterByBox(
+  items: GcMailItem[],
+  box: 'inbox' | 'sent' | 'all',
+  alias: string,
+): GcMailItem[] {
+  // Aliases are case-insensitive at our scale — gc emits a mix of styles
+  // (e.g. 'thriva/devpipeline.architect' vs 'human'). Lowercase both sides.
+  const a = alias.toLowerCase();
+  if (box === 'all') return items.slice();
+  if (box === 'inbox') {
+    return items.filter((m) => typeof m.to === 'string' && m.to.toLowerCase() === a);
+  }
+  // sent
+  return items.filter((m) => typeof m.from === 'string' && m.from.toLowerCase() === a);
 }

@@ -209,11 +209,15 @@ export function BeadsPage() {
       )}
 
       <div className="panel">
+        {/* td-liky3d: default newest-first by updated_at — most recently
+            touched beads at the top. The user can re-sort by any sortable
+            column (priority, status, id, title) by clicking the header. */}
         <Table
           columns={columns}
           rows={rows}
           rowKey={(r) => r.id}
           empty="Nothing on the queue right now"
+          initialSort={{ key: 'updated', dir: 'desc' }}
         />
       </div>
 

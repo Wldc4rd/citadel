@@ -163,6 +163,7 @@ export function ActivityPage() {
           rows={commits}
           rowKey={(r) => r.sha}
           empty="No commits returned by this view"
+          initialSort={{ key: 'date', dir: 'desc' }}
         />
       </div>
 
@@ -190,6 +191,7 @@ export function ActivityPage() {
           rows={deploys}
           rowKey={(r) => `${r.at}-${r.detail.slice(0, 24)}`}
           empty="No deploy log entries"
+          initialSort={{ key: 'at', dir: 'desc' }}
         />
       </div>
     </section>

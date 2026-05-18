@@ -177,11 +177,14 @@ export function AgentsPage() {
       </header>
 
       <div className="panel">
+        {/* td-liky3d: default newest-first by last_active so most recently
+            active sessions sit at the top + the idle ones drop to the bottom. */}
         <Table
           columns={columns}
           rows={rows}
           rowKey={(r) => r.id}
           empty="No active sessions"
+          initialSort={{ key: 'last_active', dir: 'desc' }}
         />
       </div>
 

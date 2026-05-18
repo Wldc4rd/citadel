@@ -166,12 +166,15 @@ export function MailPage() {
       </header>
 
       <div className="panel">
+        {/* td-liky3d: default newest-first. Backend already sorts the same
+            way; this is the belt that survives any future API order change. */}
         <Table
           columns={columns}
           rows={items}
           rowKey={(r) => r.id}
           onRowClick={(r) => void openThread(r)}
           empty={`${box === 'inbox' ? 'Inbox' : 'Sent'} is empty for ${viewingAs.alias}`}
+          initialSort={{ key: 'created_at', dir: 'desc' }}
         />
       </div>
 

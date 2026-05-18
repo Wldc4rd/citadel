@@ -61,10 +61,19 @@ export class GcClient {
     return this.getJson<GcBeadList>(this.cityPath('/beads'), signal);
   }
 
-  async listMail(signal?: AbortSignal, params?: { box?: 'inbox' | 'sent'; alias?: string }): Promise<GcMailList> {
+  async listMail(
+    signal?: AbortSignal,
+    params?: { box?: 'inbox' | 'sent'; alias?: string; limit?: number },
+  ): Promise<GcMailList> {
+    // NOTE: per td-h3n2ar diagnosis, gc supervisor's `box` + `alias`
+    // params are silently ignored upstream. We still pass them in case a
+    // future supervisor version starts honoring them — the no-op today is
+    // harmless. The actual sender/recipient filter happens in
+    // routes/mail.ts::filterByBox.
     const search = new URLSearchParams();
     if (params?.box) search.set('box', params.box);
     if (params?.alias) search.set('alias', params.alias);
+    if (params?.limit) search.set('limit', String(params.limit));
     const qs = search.toString();
     const path = `/mail${qs.length > 0 ? `?${qs}` : ''}`;
     return this.getJson<GcMailList>(this.cityPath(path), signal);

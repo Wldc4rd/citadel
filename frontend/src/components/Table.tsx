@@ -14,18 +14,24 @@ export interface TableColumn<T> {
   align?: 'left' | 'right';
 }
 
+type SortDir = 'asc' | 'desc';
+export interface SortState {
+  key: string;
+  dir: SortDir;
+}
+
 interface TableProps<T> {
   columns: ReadonlyArray<TableColumn<T>>;
   rows: ReadonlyArray<T>;
   rowKey: (row: T) => string;
   onRowClick?: (row: T) => void;
   empty?: ReactNode;
-}
-
-type SortDir = 'asc' | 'desc';
-interface SortState {
-  key: string;
-  dir: SortDir;
+  /**
+   * Default sort applied before the user clicks any header (td-liky3d).
+   * The user's click on a sortable header overrides this. Pass `null` (or
+   * omit) to use the row order as returned by the source.
+   */
+  initialSort?: SortState | null;
 }
 
 // Lightweight typed table. Sortable via header click, no external dep.
@@ -37,8 +43,9 @@ export function Table<T>({
   rowKey,
   onRowClick,
   empty,
+  initialSort,
 }: TableProps<T>) {
-  const [sort, setSort] = useState<SortState | null>(null);
+  const [sort, setSort] = useState<SortState | null>(initialSort ?? null);
 
   const sortedRows = useMemo(() => {
     if (sort === null) return rows;
