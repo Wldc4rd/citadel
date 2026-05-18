@@ -17,8 +17,8 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_CONCURRENT = 4;
 
 // Param schemas — every privileged exec validates its args against these.
+// SESSION_ID_RE lives in routes/sessions.ts now that peek is HTTP, not exec.
 const BEAD_ID_RE = /^(td|th|jt)-[a-z0-9-]{3,32}$/;
-const SESSION_ID_RE = /^(td|th)-[a-z0-9]{3,12}$/;
 const AGENT_ALIAS_RE = /^[a-z][a-z0-9_./-]{1,63}$/i;
 
 function cleanEnv(): NodeJS.ProcessEnv {
@@ -144,22 +144,12 @@ function sanitiseTerminalOutput(raw: string): string {
 }
 
 // ── Public exec wrappers — each one is a named, whitelisted call. ──────
-
-export async function execSessionPeek(sessionId: string): Promise<ExecResult> {
-  if (!SESSION_ID_RE.test(sessionId)) {
-    throw new ExecError(`invalid session id`, 'validation');
-  }
-  await acquireSlot();
-  try {
-    const result = await runExec('gc', ['session', 'peek', sessionId], 10_000);
-    return {
-      ...result,
-      stdout: sanitiseTerminalOutput(result.stdout),
-    };
-  } finally {
-    releaseSlot();
-  }
-}
+//
+// Note: peek used to be a shell-exec wrapper here. Architect addendum
+// td-wisp-ijk7g (mechanic td-wisp-e1v14) confirmed peek is served by
+// `gc supervisor`'s HTTP API as a structured transcript — see
+// `routes/sessions.ts` + `gc-client.ts::fetchTranscript`. The SESSION_ID_RE
+// + sanitiseTerminalOutput pair stays here for use by that path.
 
 export async function execBeadAction(
   beadId: string,

@@ -3,7 +3,16 @@ import type {
   GcBeadList,
   GcMailList,
   GcEventList,
+  TranscriptTurn,
 } from 'thriva-admin-shared';
+
+interface GcTranscriptResponse {
+  id?: string;
+  template?: string;
+  provider?: string;
+  format?: string;
+  turns?: TranscriptTurn[];
+}
 
 // Typed client for the gc supervisor HTTP API. All reads of supervisor
 // state go through here; no other module fetches from supervisor
@@ -54,5 +63,19 @@ export class GcClient {
   async listEvents(signal?: AbortSignal, after?: number): Promise<GcEventList> {
     const path = `/events${after !== undefined ? `?after=${after}` : ''}`;
     return this.getJson<GcEventList>(this.cityPath(path), signal);
+  }
+
+  /**
+   * Architect addendum (td-wisp-ijk7g + mechanic td-wisp-e1v14): peek is an
+   * HTTP endpoint, not shell-exec. Returns structured turns.
+   */
+  async fetchTranscript(
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<GcTranscriptResponse> {
+    return this.getJson<GcTranscriptResponse>(
+      this.cityPath(`/session/${encodeURIComponent(sessionId)}/transcript`),
+      signal,
+    );
   }
 }

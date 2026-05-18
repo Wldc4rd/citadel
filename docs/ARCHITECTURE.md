@@ -14,18 +14,28 @@ Rejected alternatives:
 - **Go** — wrong coupling direction (admin tool shouldn't carry gc-the-orchestrator's lang dep).
 - **Direct-from-frontend (no backend)** — doesn't work; peek + git + system-health need shell-exec.
 
-## Real-time: backend cursor-polls → SSE-to-browser
+## Real-time: direct EventSource against gc
 
-`/v0/city/{name}/events` is **not** SSE upstream — it returns cursor-paged JSON. So:
+Architect addendum **td-wisp-ijk7g** (mechanic td-wisp-e1v14) corrected the earlier reading: `/v0/city/{name}/events/stream` IS SSE today (the `/stream` suffix; the previous probe missed it). gc supervisor also serves a permissive CORS policy that echoes the request `Origin`, so the browser can `new EventSource(...)` directly against it.
 
-- Backend cursor-polls `/v0/city/thriva-dev/events` every 2 s (Phase C).
-- Backend exposes its **own** SSE endpoint (`GET /api/events`) to the browser.
-- Browser uses `EventSource` — unidirectional fits this perfectly.
-- Backend keeps last-cursor **in memory only** — no persistent store. Reconnects pick up from the server's current cursor.
-- Single cursor-poller hits `gc` once per 2 s regardless of how many browser tabs Charlie has open.
-- Belt-and-braces: every panel has a manual Refresh button. SSE drops on tab-sleep / laptop-close — the user-controlled escape valve.
+What this collapses:
 
-**Phase A** ships poll-on-mount + manual refresh only; SSE wiring lands in Phase C.
+- No backend cursor-poll indirection.
+- No backend-emitted SSE wrapper.
+- Phase C wires `EventSource` from the frontend straight to `http://127.0.0.1:8372/v0/city/thriva-dev/events/stream`, with `Last-Event-ID` for resume.
+- Belt-and-braces still applies: every panel has a manual Refresh button for the tab-sleep / laptop-close case.
+
+**Phase A** ships poll-on-mount + manual refresh only; SSE direct-from-browser lands in Phase C.
+
+## Peek is HTTP, not shell-exec
+
+Same architect addendum: `GET /v0/city/{name}/session/{id}/transcript` returns structured JSON with `turns: [{role, text}, ...]`. The dashboard fetches the transcript via the backend's `GcClient.fetchTranscript`, sanitises each turn's text server-side (ANSI/OSC/control-char strip, per-turn 16 KB cap, total 256 KB cap), and the frontend renders each turn as a role-tagged block.
+
+Why we still go through the backend for peek (rather than calling gc direct from the browser):
+
+- The frontend's CSRF / audit posture stays uniform across read + write paths.
+- Server-side sanitisation is the load-bearing XSS defence; doing it in one place (`routes/sessions.ts::buildTranscriptResult`) avoids the temptation to skip it on a client-only path.
+- Future SSE upgrade for live-tail can swap from the polled transcript to the streaming endpoint without re-architecting the consumer.
 
 ## Deploy: systemd user unit (NOT `gc [[services]]`)
 

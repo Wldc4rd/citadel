@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnsiUp } from 'ansi_up';
-import type { GcSession, PeekResult } from 'thriva-admin-shared';
+import type { GcSession, TranscriptResult, TranscriptTurn } from 'thriva-admin-shared';
 import { api, ApiClientError } from '../api/client';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
@@ -16,7 +16,7 @@ export function AgentsPage() {
   const [now, setNow] = useState(() => Date.now());
 
   const [peekFor, setPeekFor] = useState<GcSession | null>(null);
-  const [peekResult, setPeekResult] = useState<PeekResult | null>(null);
+  const [peekResult, setPeekResult] = useState<TranscriptResult | null>(null);
   const [peekLoading, setPeekLoading] = useState(false);
   const [peekError, setPeekError] = useState<string | null>(null);
 
@@ -180,8 +180,12 @@ export function AgentsPage() {
       <Modal
         open={peekFor !== null}
         onClose={() => setPeekFor(null)}
-        title={peekFor ? `${peekFor.alias ?? peekFor.title ?? peekFor.id} — peek` : 'peek'}
-        caption={peekResult ? `${peekResult.bytes} bytes · captured ${formatRelative(peekResult.captured_at, Date.now())}` : 'one-shot tmux snapshot'}
+        title={peekFor ? `${peekFor.alias ?? peekFor.title ?? peekFor.id} — transcript` : 'transcript'}
+        caption={
+          peekResult
+            ? `${peekResult.turns.length} turn(s) · ${formatChars(peekResult.total_chars)} · captured ${formatRelative(peekResult.captured_at, Date.now())}`
+            : "one-shot snapshot from gc supervisor's /transcript API"
+        }
         widthClass="max-w-5xl"
         footer={
           <Button
@@ -190,7 +194,7 @@ export function AgentsPage() {
             onClick={() => peekFor && void handlePeek(peekFor)}
             disabled={peekLoading}
           >
-            Re-peek
+            Re-fetch
           </Button>
         }
       >
@@ -211,19 +215,10 @@ function PeekContent({
 }: {
   loading: boolean;
   error: string | null;
-  result: PeekResult | null;
+  result: TranscriptResult | null;
 }) {
-  const preRef = useRef<HTMLPreElement>(null);
-  useEffect(() => {
-    if (!result || !preRef.current) return;
-    // ansi_up sees only safe SGR sequences — server strips OSC + cursor moves.
-    const renderer = new AnsiUp();
-    renderer.use_classes = true;
-    preRef.current.innerHTML = renderer.ansi_to_html(result.content);
-  }, [result]);
-
   if (loading) {
-    return <p className="text-ink-300 italic text-sm">Fetching tmux pane…</p>;
+    return <p className="text-ink-300 italic text-sm">Fetching transcript…</p>;
   }
   if (error) {
     return (
@@ -233,23 +228,77 @@ function PeekContent({
     );
   }
   if (!result) return null;
+  if (result.turns.length === 0) {
+    return <p className="text-ink-300 italic text-sm">No turns in this session yet.</p>;
+  }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <p className="text-[11px] text-warn-500 bg-warn-500/10 border border-warn-500/30 rounded-md px-2 py-1">
         {PROMPT_INJECTION_NOTICE}
       </p>
-      <pre
-        ref={preRef}
-        className="bg-ink-900 border border-ink-700 rounded-md p-3 text-xs font-sans whitespace-pre-wrap leading-relaxed overflow-x-auto"
-      />
+      <ol className="space-y-2">
+        {result.turns.map((turn, idx) => (
+          <TurnBlock key={idx} turn={turn} index={idx} />
+        ))}
+      </ol>
       {result.truncated && (
         <p className="text-[11px] text-ink-300 italic">
-          Output was truncated at the 100&thinsp;KB cap. Run <code>gc session peek</code> in a terminal for the full pane.
+          Some turns were truncated at the per-turn / total cap. Run <code>gc session peek</code> in a terminal for the full transcript.
         </p>
       )}
     </div>
   );
+}
+
+function TurnBlock({ turn, index }: { turn: TranscriptTurn; index: number }) {
+  // ansi_up sees only safe SGR sequences — server-side sanitiseTerminalOutput
+  // strips OSC + non-SGR CSI + control chars before the turn reaches us.
+  const html = useMemo(() => {
+    const renderer = new AnsiUp();
+    renderer.use_classes = true;
+    return renderer.ansi_to_html(turn.text);
+  }, [turn.text]);
+
+  return (
+    <li className="rounded-md border border-ink-700 bg-ink-900/60 overflow-hidden">
+      <header className="flex items-center justify-between gap-2 px-3 py-1 border-b border-ink-700 bg-ink-800/60">
+        <span className="text-[10px] uppercase tracking-wider text-ink-300">
+          #{index + 1}
+        </span>
+        <RolePill role={turn.role} />
+      </header>
+      <pre
+        className="px-3 py-2 text-xs font-sans whitespace-pre-wrap leading-relaxed overflow-x-auto text-ink-100"
+        // eslint-disable-next-line react/no-danger -- html is ansi_up output of server-sanitised text; see SECURITY.md
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    </li>
+  );
+}
+
+function RolePill({ role }: { role: string }) {
+  const tone =
+    role === 'assistant'
+      ? 'bg-accent-700/20 text-accent-500 border-accent-700/40'
+      : role === 'user'
+        ? 'bg-thriva-primary/20 text-thriva-primary border-thriva-primary/40'
+        : role === 'system'
+          ? 'bg-warn-500/20 text-warn-500 border-warn-500/40'
+          : role === 'tool_use' || role === 'tool_result'
+            ? 'bg-ink-700 text-ink-200 border-ink-600'
+            : 'bg-ink-700/60 text-ink-300 border-ink-600';
+  return (
+    <span className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${tone}`}>
+      {role}
+    </span>
+  );
+}
+
+function formatChars(n: number): string {
+  if (n < 1024) return `${n}`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function StatePill({

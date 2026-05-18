@@ -1,7 +1,7 @@
 import type {
   GcSession,
   GcBead,
-  PeekResult,
+  TranscriptResult,
   ApiError,
 } from 'thriva-admin-shared';
 
@@ -66,7 +66,7 @@ export const api = {
   listSessions(): Promise<{ items: GcSession[] }> {
     return request('GET', '/api/sessions');
   },
-  peekSession(id: string): Promise<PeekResult> {
+  peekSession(id: string): Promise<TranscriptResult> {
     return request('POST', `/api/sessions/${encodeURIComponent(id)}/peek`, {});
   },
   listBeads(showAll?: boolean): Promise<{ items: GcBead[]; total: number; returned: number }> {

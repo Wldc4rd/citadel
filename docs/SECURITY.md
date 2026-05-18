@@ -42,10 +42,13 @@ curl -sX POST http://127.0.0.1:8081/api/sessions/td-foo/peek -H 'Host: 127.0.0.1
 
 Every privileged invocation routes through `backend/src/exec.ts`. **No general-purpose exec helper exists.**
 
-- **Enum whitelist** of allowed commands: `gc session peek <id>`, `gc bd update <id> --status=... --assignee=...`, `gc bd close <id> [--reason=...]`, `gc agents nudge <alias>`.
-- **Param schemas** enforced before spawn:
+- **Enum whitelist** of allowed commands: `gc bd update <id> --status=... --assignee=...`, `gc bd close <id> [--reason=...]`, `gc agents nudge <alias>`.
+
+  *Peek is no longer in this list:* architect addendum td-wisp-ijk7g (mechanic td-wisp-e1v14) confirmed peek is served by gc supervisor's `GET /v0/city/{name}/session/{id}/transcript` HTTP endpoint as structured turns. The dashboard fetches the transcript via `GcClient.fetchTranscript` and sanitises text fields server-side with the same `sanitiseTerminalOutput` it would have applied to shell output. No `subprocess.spawn` involved — one less attack surface in the privileged-exec path.
+
+- **Param schemas** enforced before any privileged call:
   - Bead id: `^(td|th|jt)-[a-z0-9-]{3,32}$`
-  - Session id: `^(td|th)-[a-z0-9]{3,12}$`
+  - Session id: `^(td|th)-[a-z0-9]{3,12}$` (validated in `routes/sessions.ts` before the gc HTTP call)
   - Agent alias: `^[a-z][a-z0-9_./-]{1,63}$`
 - **Spawn options**:
   - `shell: false` — non-negotiable. No `sh -c`, no command injection vectors.
@@ -70,6 +73,15 @@ Everything rendered in the UI that originated outside the dashboard (mail bodies
 - React's default escaping is the friend. `{content}` not `dangerouslySetInnerHTML`. No `innerHTML`, no `document.write`, no `eval`, no `Function()` anywhere in the frontend.
 - Peek output: server-side strips ANSI/OSC/control characters (`backend/src/exec.ts::sanitiseTerminalOutput`) and passes only safe SGR. Client renders with `ansi_up` (uses CSS classes, not inline styles, courtesy of `use_classes = true`).
 - Mail bodies + bead descriptions render in `<pre>` with full text escaping.
+
+### The one `dangerouslySetInnerHTML` exception
+
+Each transcript turn in `routes/Agents.tsx::TurnBlock` uses `dangerouslySetInnerHTML` to inject the HTML that `ansi_up` produces from the turn's text. This is the canonical pattern for `ansi_up` and is safe for two layered reasons:
+
+1. **Server-side sanitisation runs first** — every turn's text passes through `sanitiseTerminalOutput` before it reaches the browser, which strips OSC sequences, non-SGR CSI sequences, and control characters. The string ansi_up sees contains only printable characters plus safe SGR colour escapes.
+2. **`ansi_up` with `use_classes = true` does not pass through arbitrary HTML** — it HTML-escapes `<`, `>`, `&` from the input and emits only `<span class="ansi-...">` wrappers (no inline styles, no event handlers, no `<script>` / `<iframe>` / `<a>`).
+
+The `eslint-disable react/no-danger` comment at the call site cross-references this exception. **Any other use of `dangerouslySetInnerHTML` in the codebase is a bug — flag at review.**
 
 ### Banner
 
