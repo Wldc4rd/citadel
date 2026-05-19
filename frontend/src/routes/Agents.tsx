@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { GcSession, TranscriptResult } from 'citadel-shared';
 import { api, ApiClientError } from '../api/client';
 import { Button } from '../components/Button';
@@ -6,6 +7,11 @@ import { Modal } from '../components/Modal';
 import { Table, type TableColumn } from '../components/Table';
 import { SessionPeekContent, formatPeekCaption } from '../components/SessionPeekContent';
 import { useGcEventRefresh } from '../hooks/useGcEvents';
+
+/** Slug used as the /agents/:slug param. session_name is always present and URL-safe; alias has '/' which doesn't fit a single React Router segment. Fallback to id covers the rare missing-session_name case. */
+function detailSlug(s: GcSession): string {
+  return s.session_name ?? s.alias ?? s.id;
+}
 
 export function AgentsPage() {
   const [rows, setRows] = useState<GcSession[]>([]);
@@ -76,14 +82,18 @@ export function AgentsPage() {
       sortable: true,
       sortValue: (r) => r.alias ?? r.title ?? r.id,
       render: (r) => (
-        <div className="min-w-0">
-          <div className="text-ink-100 font-medium truncate">
+        <Link
+          to={`/agents/${encodeURIComponent(detailSlug(r))}`}
+          className="block min-w-0 group"
+          title="Open agent drill-in"
+        >
+          <div className="text-ink-100 font-medium truncate group-hover:text-accent-500 group-hover:underline">
             {r.alias ?? r.title ?? r.id}
           </div>
           <div className="text-[11px] text-ink-300 truncate">
             {r.template ?? r.provider ?? ''}
           </div>
-        </div>
+        </Link>
       ),
     },
     {
@@ -161,7 +171,7 @@ export function AgentsPage() {
         <div>
           <h1 className="text-lg font-sans font-semibold text-ink-100">Agents</h1>
           <p className="text-xs text-ink-300">
-            Live session state from <code className="font-sans">gc supervisor</code>. Click Peek for a one-shot tmux snapshot.
+            Live session state from <code className="font-sans">gc supervisor</code>. Click the agent name for the drill-in, or Peek for a one-shot transcript snapshot.
           </p>
         </div>
         <div className="flex items-center gap-2">
