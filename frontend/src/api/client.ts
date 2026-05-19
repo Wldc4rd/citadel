@@ -10,6 +10,10 @@ import type {
   DeployList,
   SystemHealth,
   DoltNomsTrend,
+  AdminAction,
+  AdminActionResult,
+  PipelineStageCounts,
+  ThroughputTrend,
   ApiError,
 } from 'citadel-shared';
 
@@ -78,6 +82,9 @@ export const api = {
   peekSession(id: string): Promise<TranscriptResult> {
     return request('POST', `/api/sessions/${encodeURIComponent(id)}/peek`, {});
   },
+  nudgeSession(id: string, message?: string): Promise<{ ok: true; stdout: string; duration_ms: number }> {
+    return request('POST', `/api/sessions/${encodeURIComponent(id)}/nudge`, message ? { message } : {});
+  },
   listBeads(showAll?: boolean): Promise<{
     items: GcBead[];
     total: number;
@@ -125,5 +132,15 @@ export const api = {
   },
   doltTrend(): Promise<DoltNomsTrend> {
     return request('GET', '/api/dolt-noms/trend');
+  },
+  // ── Cockpit (td-a40qsy) ────────────────────────────────────────────
+  throughputTrend(): Promise<ThroughputTrend> {
+    return request('GET', '/api/admin/throughput-trend');
+  },
+  pipelineStageCounts(): Promise<PipelineStageCounts> {
+    return request('GET', '/api/admin/pipeline-stage-counts');
+  },
+  adminAction(action: AdminAction): Promise<AdminActionResult> {
+    return request('POST', `/api/admin/${action}`, {});
   },
 };

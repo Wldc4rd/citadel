@@ -291,4 +291,180 @@ export async function execGitLog(view: string): Promise<ExecResult> {
   }
 }
 
+// ── Cockpit destructive admin actions (td-a40qsy) ──────────────────────
+//
+// Each city-level action is its own named wrapper with NO arbitrary args.
+// Defense-in-depth on the supervisor-auth concern in th-s1sqq: even if
+// some future regression breaks Origin/CSRF/host checks upstream, this
+// enum + the AGENT_NAME_RE below is the floor — no caller can shape a
+// `gc agent suspend <attacker-chosen-name>` from this surface.
+//
+// AGENT_NAME_RE is intentionally stricter than AGENT_ALIAS_RE: the four
+// city-level actions only ever touch named agents in city.toml; there
+// is no rig/path syntax to permit.
+const ADMIN_AGENT_NAME_RE = /^[a-z][a-z0-9_-]{1,32}$/;
+
+// Hardcoded enum of agent names eligible for suspend/resume from the
+// cockpit. v0: only "polecat" — Charlie's filed list of "common knobs"
+// names polecats (the worker pool). To expand the list later, add the
+// name here AND surface a button in the frontend. There is intentionally
+// no dynamic list-of-agents-from-config path — that's how arbitrary
+// suspend/resume creeps in.
+const COCKPIT_SUSPEND_AGENTS: ReadonlyArray<string> = ['polecat'];
+
+function isCockpitSuspendAgent(name: string): boolean {
+  if (!ADMIN_AGENT_NAME_RE.test(name)) return false;
+  return COCKPIT_SUSPEND_AGENTS.includes(name);
+}
+
+/** Maps to `gc agent suspend <name>`. */
+export async function execAgentSuspend(name: string): Promise<ExecResult> {
+  if (!isCockpitSuspendAgent(name)) {
+    throw new ExecError('agent not in cockpit suspend allowlist', 'validation');
+  }
+  await acquireSlot();
+  try {
+    return await runExec('gc', ['agent', 'suspend', name], 10_000);
+  } finally {
+    releaseSlot();
+  }
+}
+
+/** Maps to `gc agent resume <name>`. */
+export async function execAgentResume(name: string): Promise<ExecResult> {
+  if (!isCockpitSuspendAgent(name)) {
+    throw new ExecError('agent not in cockpit suspend allowlist', 'validation');
+  }
+  await acquireSlot();
+  try {
+    return await runExec('gc', ['agent', 'resume', name], 10_000);
+  } finally {
+    releaseSlot();
+  }
+}
+
+/**
+ * `gc stop` — graceful shutdown of all agent sessions in the city.
+ * Pass --timeout=30s to bound wall-clock so the HTTP request doesn't
+ * hang on a slow agent shutdown. The 30s is a backstop; gc honours its
+ * own internal grace timers underneath that.
+ */
+export async function execCityStop(): Promise<ExecResult> {
+  await acquireSlot();
+  try {
+    // exec timeout slightly above the gc --timeout to give gc a chance
+    // to surface its own "force-killed N orphans" summary before we cap.
+    return await runExec('gc', ['stop', '--timeout=30s'], 35_000);
+  } finally {
+    releaseSlot();
+  }
+}
+
+/**
+ * `gc restart` — equivalent to stop + start. Same timeout reasoning as
+ * execCityStop; restart has start latency on top so we cap a bit
+ * higher.
+ */
+export async function execCityRestart(): Promise<ExecResult> {
+  await acquireSlot();
+  try {
+    return await runExec('gc', ['restart'], 60_000);
+  } finally {
+    releaseSlot();
+  }
+}
+
+/**
+ * `gc bd list --status=closed --closed-after=<iso> --json` — used by the
+ * cockpit throughput trend. The supervisor's HTTP /beads endpoint omits
+ * `closed_at` on closed beads (and `updated_at` too), so the bd CLI is
+ * the only source of closure timestamps. The `--closed-after` server-side
+ * filter is critical: a no-window query returns hundreds of KB and the
+ * 100KB MAX_BYTES cap in runExec terminates the process with no exit
+ * code. With a 6-hour window the output is typically <50 beads (~30KB).
+ *
+ * `cityPath` is the absolute path to the city root (--city=<name> is
+ * interpreted as a relative path, not a registered-city lookup).
+ *
+ * `closedAfter` is an ISO-8601 instant (e.g. "2026-05-19T10:00:00Z").
+ */
+export async function execBdListClosed(
+  cityPath: string,
+  closedAfter: string,
+  limit: number,
+): Promise<ExecResult> {
+  // Defensive: cityPath comes from server config, but treat as untrusted
+  // anyway — block ../ and ensure it's absolute. exec.ts is the choke
+  // point; centralising the check here makes any future caller safe.
+  if (!cityPath.startsWith('/') || cityPath.includes('..')) {
+    throw new ExecError('invalid city path', 'validation');
+  }
+  // closedAfter is rendered from server `new Date().toISOString()` and not
+  // user input today, but defend the boundary anyway — the regex matches
+  // an ISO instant and nothing else, so no shell or flag injection slips
+  // in even if the source ever changes.
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(closedAfter)) {
+    throw new ExecError('invalid closed-after timestamp', 'validation');
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > 5000) {
+    throw new ExecError('invalid limit', 'validation');
+  }
+  await acquireSlot();
+  try {
+    // --exclude-label=order-tracking AND --exclude-type=session,message,convoy:
+    // both pre-filter system noise upstream so the JSON output fits well
+    // within runExec's MAX_BYTES cap. Without the type-exclusion, session
+    // beads (~3-5KB each, hundreds per 6h window) blow past 100KB long
+    // before any limit takes effect. The JS-side isEngBead filter in
+    // routes/admin.ts:computeThroughput still applies the final pass —
+    // these excludes are a bandwidth saver, not the source of truth.
+    return await runExec(
+      'gc',
+      [
+        'bd',
+        'list',
+        `--city=${cityPath}`,
+        '--status=closed',
+        `--closed-after=${closedAfter}`,
+        '--exclude-label=order-tracking',
+        '--exclude-type=session,message,convoy',
+        `--limit=${limit}`,
+        '--json',
+      ],
+      15_000,
+    );
+  } finally {
+    releaseSlot();
+  }
+}
+
+/**
+ * `gc session nudge <alias> <message>` — deliver text to a running
+ * session. Used by cockpit "Nudge mayor" + future per-agent drill-in.
+ * Wait-idle delivery is the default (gc waits for the agent's next
+ * interactive boundary before sending) — this is the right semantic for
+ * a "go check your queue" nudge and avoids interrupting mid-tool-use.
+ */
+export async function execSessionNudge(
+  alias: string,
+  message: string,
+): Promise<ExecResult> {
+  if (!AGENT_ALIAS_RE.test(alias)) {
+    throw new ExecError('invalid session alias', 'validation');
+  }
+  if (message.length === 0 || message.length > 1024) {
+    throw new ExecError('message must be 1–1024 chars', 'validation');
+  }
+  await acquireSlot();
+  try {
+    return await runExec(
+      'gc',
+      ['session', 'nudge', alias, message],
+      10_000,
+    );
+  } finally {
+    releaseSlot();
+  }
+}
+
 export { sanitiseTerminalOutput };

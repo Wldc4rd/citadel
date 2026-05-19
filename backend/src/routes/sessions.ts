@@ -1,12 +1,21 @@
 import { Router } from 'express';
 import type { TranscriptResult, TranscriptTurn } from 'citadel-shared';
 import type { GcClient } from '../gc-client.js';
-import { sanitiseTerminalOutput } from '../exec.js';
+import { ExecError, execSessionNudge, sanitiseTerminalOutput } from '../exec.js';
 import { recordAudit } from '../audit.js';
 
 const SESSION_ID_RE = /^(td|th)-[a-z0-9]{3,12}$/;
 const PER_TURN_CAP = 16 * 1024;
 const TOTAL_CAP = 256 * 1024;
+
+// Default nudge message used when the caller omits one. Short + neutral
+// — the agent's prompt template knows what "check work" means in
+// context. The cockpit's "Nudge mayor" button (td-a40qsy success
+// criterion: "One-click 'nudge mayor' works without leaving the page")
+// uses this default; future per-agent drill-in UIs can pass a custom
+// message.
+const DEFAULT_NUDGE_MESSAGE = 'check work';
+const MAX_NUDGE_MESSAGE_LEN = 1024;
 
 export function sessionsRouter(gc: GcClient): Router {
   const router = Router();
@@ -19,6 +28,63 @@ export function sessionsRouter(gc: GcClient): Router {
       res
         .status(502)
         .json({ error: 'failed to list sessions', kind: 'upstream', details: { message: (err as Error).message } });
+    }
+  });
+
+  // POST /api/sessions/:id/nudge — delivers a text nudge to a running session.
+  //
+  // Cockpit (td-a40qsy) success criterion: "one-click 'nudge mayor'
+  // works without leaving the page." Uses gc session nudge under the
+  // hood; wait-idle delivery (gc default) so we don't interrupt
+  // mid-tool-use. The message defaults to a short neutral string when
+  // omitted by the caller.
+  router.post('/:id/nudge', async (req, res) => {
+    const id = req.params.id;
+    if (!SESSION_ID_RE.test(id)) {
+      res.status(400).json({ error: 'invalid session id', kind: 'validation' });
+      return;
+    }
+    const rawMessage = typeof req.body?.message === 'string' ? req.body.message : '';
+    const message = rawMessage.length > 0 ? rawMessage : DEFAULT_NUDGE_MESSAGE;
+    if (message.length > MAX_NUDGE_MESSAGE_LEN) {
+      res.status(400).json({
+        error: `message exceeds ${MAX_NUDGE_MESSAGE_LEN} chars`,
+        kind: 'validation',
+      });
+      return;
+    }
+    const start = Date.now();
+    try {
+      const result = await execSessionNudge(id, message);
+      void recordAudit({
+        type: 'dashboard.exec',
+        endpoint: 'POST /api/sessions/:id/nudge',
+        parsed_args: { session_id: id, message_len: String(message.length) },
+        exit_code: result.exitCode,
+        duration_ms: result.durationMs,
+      });
+      if (result.exitCode !== 0) {
+        res.status(502).json({
+          error: `gc session nudge failed with exit ${result.exitCode}`,
+          kind: 'upstream',
+          details: { stderr: result.stderr.slice(0, 1024) },
+        });
+        return;
+      }
+      res.json({ ok: true, stdout: result.stdout.slice(0, 1024), duration_ms: result.durationMs });
+    } catch (err) {
+      void recordAudit({
+        type: 'dashboard.exec',
+        endpoint: 'POST /api/sessions/:id/nudge',
+        parsed_args: { session_id: id, failed: 'true' },
+        duration_ms: Date.now() - start,
+      });
+      if (err instanceof ExecError) {
+        const status = err.kind === 'validation' ? 400 : err.kind === 'timeout' ? 504 : 500;
+        res.status(status).json({ error: err.message, kind: err.kind });
+        return;
+      }
+      res.status(500).json({ error: (err as Error).message, kind: 'internal' });
     }
   });
 

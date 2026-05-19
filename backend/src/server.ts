@@ -19,6 +19,7 @@ import { gitRouter } from './routes/git.js';
 import { buildsRouter } from './routes/builds.js';
 import { healthRouter } from './routes/health.js';
 import { doltRouter, startDoltNomsSampler } from './routes/dolt.js';
+import { adminRouter } from './routes/admin.js';
 import { setAuditLogPath } from './audit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -75,6 +76,8 @@ function main(): void {
   writeRouter.use('/builds', buildsRouter());
   writeRouter.use('/system', healthRouter(gc));
   writeRouter.use('/dolt-noms', doltRouter());
+  // Cockpit (td-a40qsy) — engine gauges + destructive common knobs.
+  writeRouter.use('/admin', adminRouter(gc, config.cityPath));
 
   app.use('/api', writeRouter);
 
