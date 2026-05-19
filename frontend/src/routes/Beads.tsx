@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { GcBead } from 'citadel-shared';
 import { api, ApiClientError } from '../api/client';
 import { Button } from '../components/Button';
@@ -90,7 +91,13 @@ export function BeadsPage() {
       sortable: true,
       sortValue: (r) => r.id,
       render: (r) => (
-        <code className="font-sans text-xs text-accent-500">{r.id}</code>
+        <Link
+          to={`/beads/${encodeURIComponent(r.id)}`}
+          className="font-sans text-xs text-accent-500 hover:underline"
+          title="Open bead drill-in"
+        >
+          {r.id}
+        </Link>
       ),
       className: 'w-28',
     },
@@ -101,7 +108,13 @@ export function BeadsPage() {
       sortValue: (r) => r.title,
       render: (r) => (
         <div className="min-w-0">
-          <p className="text-ink-100 truncate">{r.title}</p>
+          <Link
+            to={`/beads/${encodeURIComponent(r.id)}`}
+            className="text-ink-100 truncate hover:text-accent-500 hover:underline block"
+            title="Open bead drill-in"
+          >
+            {r.title}
+          </Link>
           <p className="text-[11px] text-ink-300">
             {r.issue_type}{r.assignee ? ` · ${r.assignee}` : ''}
           </p>

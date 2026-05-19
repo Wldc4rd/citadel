@@ -38,4 +38,54 @@
   .ansi-bright-magenta { color: #e0bbff; font-weight: 600; }
   .ansi-bright-cyan { color: #b8ecec; font-weight: 600; }
   .ansi-bright-white { color: #ffffff; font-weight: 600; }
+
+  /* Server-rendered markdown content in the bead drill-in (td-384rhs).
+     HTML comes from backend/src/markdown.ts with a strict-allowlist
+     renderer; these styles assume only the allowlisted tags will appear
+     (h1-h6, p, ul/ol/li, code, pre, blockquote, strong/em/del, a, hr,
+     br, table/tr/td/th). No leftover prose-* deps. */
+  .prose-bead h1,
+  .prose-bead h2,
+  .prose-bead h3,
+  .prose-bead h4 {
+    @apply text-ink-100 font-semibold mt-3 mb-1;
+  }
+  .prose-bead h1 { @apply text-base; }
+  .prose-bead h2 { @apply text-sm uppercase tracking-wider text-ink-300; }
+  .prose-bead h3 { @apply text-sm; }
+  .prose-bead h4 { @apply text-xs uppercase tracking-wider text-ink-300; }
+  .prose-bead p { @apply mb-2 leading-relaxed; }
+  .prose-bead p:last-child { @apply mb-0; }
+  .prose-bead ul,
+  .prose-bead ol { @apply pl-5 mb-2 space-y-0.5; }
+  .prose-bead ul { @apply list-disc; }
+  .prose-bead ol { @apply list-decimal; }
+  .prose-bead li { @apply leading-relaxed; }
+  .prose-bead code {
+    @apply rounded bg-ink-900 px-1 py-0.5 text-[12px] text-accent-500 font-sans;
+  }
+  .prose-bead pre {
+    @apply rounded-md bg-ink-900 border border-ink-700 px-3 py-2 overflow-x-auto mb-2 text-[12px] text-ink-100;
+  }
+  .prose-bead pre code {
+    @apply bg-transparent text-ink-100 p-0;
+  }
+  .prose-bead blockquote {
+    @apply border-l-2 border-ink-600 pl-3 italic text-ink-200 mb-2;
+  }
+  .prose-bead a {
+    @apply text-accent-500 hover:underline;
+  }
+  .prose-bead a.bead-mention {
+    @apply font-sans;
+  }
+  .prose-bead strong { @apply text-ink-100 font-semibold; }
+  .prose-bead em { @apply italic; }
+  .prose-bead hr { @apply border-ink-700 my-3; }
+  .prose-bead table { @apply text-xs border-collapse mb-2; }
+  .prose-bead th,
+  .prose-bead td {
+    @apply border border-ink-700 px-2 py-1 text-left;
+  }
+  .prose-bead th { @apply bg-ink-900 text-ink-300 font-medium; }
 }

@@ -18,7 +18,14 @@ const MAX_CONCURRENT = 4;
 
 // Param schemas — every privileged exec validates its args against these.
 // SESSION_ID_RE lives in routes/sessions.ts now that peek is HTTP, not exec.
-const BEAD_ID_RE = /^(td|th|jt)-[a-z0-9-]{3,32}$/;
+// Bead-id prefixes correspond to the rigs/scopes the city uses:
+//   td   — city-scoped (the hq rig)
+//   th   — thriva rig
+//   jt   — jetsons rig
+//   cd   — citadel rig (added with td-3cyob3 rig adoption)
+//   thriva — legacy long-form thriva prefix, occasionally seen
+// Mention auto-linking in markdown.ts uses the same set.
+const BEAD_ID_RE = /^(td|th|jt|cd|thriva)-[a-z0-9-]{3,32}$/;
 const AGENT_ALIAS_RE = /^[a-z][a-z0-9_./-]{1,63}$/i;
 
 function cleanEnv(): NodeJS.ProcessEnv {
@@ -432,6 +439,38 @@ export async function execBdListClosed(
         '--json',
       ],
       15_000,
+    );
+  } finally {
+    releaseSlot();
+  }
+}
+
+/**
+ * `gc bd show <bead-id> --json` — used by the bead drill-in (td-384rhs)
+ * to fetch the full bead record. Supervisor's HTTP /v0/city/{name}/bead/{id}
+ * returns only id/title/status/issue_type/priority/created_at/assignee/
+ * description/labels/dependencies — missing design/notes/closed_at/
+ * updated_at/owner/created_by/etc. that the bd CLI returns.
+ *
+ * `cityPath` is the absolute path to the city root (--city=name is
+ * relative-path-only). `beadId` is validated against BEAD_ID_RE.
+ */
+export async function execBdShow(
+  cityPath: string,
+  beadId: string,
+): Promise<ExecResult> {
+  if (!cityPath.startsWith('/') || cityPath.includes('..')) {
+    throw new ExecError('invalid city path', 'validation');
+  }
+  if (!BEAD_ID_RE.test(beadId)) {
+    throw new ExecError('invalid bead id', 'validation');
+  }
+  await acquireSlot();
+  try {
+    return await runExec(
+      'gc',
+      ['bd', 'show', beadId, `--city=${cityPath}`, '--json'],
+      10_000,
     );
   } finally {
     releaseSlot();
