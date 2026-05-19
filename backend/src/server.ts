@@ -89,10 +89,10 @@ function main(): void {
     });
   });
 
-  // Start the dolt-noms 10-min sampler. The actual metric source is
-  // pending mechanic surgical-ask; the sampler is wired so the ring
-  // buffer starts filling the moment the source lands.
-  startDoltNomsSampler();
+  // Start the dolt-noms 10-min sampler. Source landed in td-pke1a9 —
+  // walks the on-disk Dolt tree (config.doltNomsRoot, defaulting to
+  // <city>/.beads/dolt) and sums file sizes per tick.
+  startDoltNomsSampler({ doltNomsRoot: config.doltNomsRoot });
 
   // ── Frontend static files (prod) ──────────────────────────────────────
   const distDir = path.resolve(__dirname, '..', config.frontendDistPath);

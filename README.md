@@ -61,6 +61,7 @@ All knobs are environment variables. See [`backend/src/config.ts`](backend/src/c
 | `GC_CITY_NAME` | `thriva-dev` | Name of the city this dashboard manages (one dashboard per city) |
 | `ADMIN_AUDIT_LOG_PATH` | (gc's `events.jsonl`) | Where state-changing actions append audit entries |
 | `ADMIN_FRONTEND_DIST` | `../frontend/dist` | Path to built frontend assets |
+| `ADMIN_DOLT_NOMS_ROOT` | `/home/charlie/thriva-dev/.beads/dolt` | Root of the bd-store Dolt tree the Health sparkline samples (10-min cadence). Set to `""` to disable. |
 | `THRIVA_ADMIN_GIT_REPO` | `/home/charlie/thriva` | Repo for the Activity view's `git log` queries |
 | `THRIVA_ADMIN_DASHBOARD_DISABLED` | `0` | Kill switch — set to `1` to refuse to start |
 
