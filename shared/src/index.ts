@@ -40,6 +40,10 @@ export interface GcSession {
   /** Coarse activity hint: 'idle' | 'thinking' | 'tool_use' | ... */
   activity?: string;
   provider?: string;
+  /** Most recent ISO of a delivered nudge — useful for diagnosing why an agent hasn't responded. */
+  last_nudge_delivered_at?: IsoTimestamp;
+  /** Bead the agent is currently working on (per `gc supervisor` heuristic). */
+  active_bead?: BeadId;
 }
 
 export type GcSessionState =
