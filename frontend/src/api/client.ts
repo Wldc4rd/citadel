@@ -13,6 +13,7 @@ import type {
   AdminAction,
   AdminActionResult,
   BeadDetailResponse,
+  KanbanResponse,
   PipelineStageCounts,
   ThroughputTrend,
   ApiError,
@@ -146,5 +147,8 @@ export const api = {
   },
   adminAction(action: AdminAction): Promise<AdminActionResult> {
     return request('POST', `/api/admin/${action}`, {});
+  },
+  kanban(): Promise<KanbanResponse> {
+    return request('GET', '/api/admin/kanban');
   },
 };

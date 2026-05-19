@@ -125,6 +125,17 @@ export interface GcBead {
   dependent_count?: number;
   comment_count?: number;
   metadata?: Record<string, unknown>;
+  /**
+   * Supervisor's HTTP /beads returns dependencies as a list of edge
+   * stubs ({issue_id, depends_on_id, type}). The bd CLI returns the
+   * richer per-dep bead-object form (see BeadDependency in this file
+   * for that shape). Both surfaces are typed loosely as unknown[]
+   * here because GcBead is the lowest-common-denominator wire shape
+   * and the two surfaces don't agree — narrow at the consumer
+   * (BeadDetailRaw uses BeadDependency[]; admin.ts:kanban casts
+   * to {depends_on_id}-style stubs).
+   */
+  dependencies?: unknown[];
 }
 
 export interface GcBeadList {
@@ -287,6 +298,68 @@ export interface GcEventList {
   items: GcEvent[];
   /** Cursor to pass back as ?after=<cursor> to resume. */
   next?: number;
+}
+
+// ── Kanban view (td-wyr6ly) ───────────────────────────────────────────────
+
+/**
+ * Ordered list of Kanban columns. Order is the rendering order on
+ * screen (left to right). Strawman per td-wyr6ly + Charlie directive;
+ * blocked-real/blocked-stale distinction is computed client-of-the-classifier
+ * side using open-bead-id set membership of each blocked bead's deps.
+ */
+export type KanbanColumn =
+  | 'mayor_plate'
+  | 'in_flight'
+  | 'stalled'
+  | 'blocked_real'
+  | 'blocked_stale'
+  | 'in_review'
+  | 'needs_changes'
+  | 'approved'
+  | 'closed_24h';
+
+export const KANBAN_COLUMNS: readonly KanbanColumn[] = [
+  'mayor_plate',
+  'in_flight',
+  'stalled',
+  'blocked_real',
+  'blocked_stale',
+  'in_review',
+  'needs_changes',
+  'approved',
+  'closed_24h',
+];
+
+/**
+ * Card shape — just the fields the Kanban card needs to render, so the
+ * payload is tight even with hundreds of beads. The card links to
+ * /beads/:id (td-384rhs drill-in) on click.
+ */
+export interface KanbanCard {
+  id: BeadId;
+  /** Truncated server-side so the wire stays small. */
+  title: string;
+  /** Bead's assignee field as-is (empty string if missing). Used as text only. */
+  assignee: string;
+  /** ISO of the most-recent activity signal on the bead OR its
+   *  bound session — populated whichever surface drove the classification. */
+  last_active: IsoTimestamp | null;
+  /** Number of open dependencies, for the badge. */
+  open_blocker_count: number;
+  priority: number;
+}
+
+/**
+ * Response for /api/admin/kanban — columns keyed by name, cards inside.
+ * `as_of` is the snapshot time (drives stale-data UX).
+ */
+export interface KanbanResponse {
+  as_of: IsoTimestamp;
+  /** Column → cards, in the order suggested for display per column (newest first). */
+  columns: Record<KanbanColumn, KanbanCard[]>;
+  /** Total eng beads visible to the classifier (sum of all columns). */
+  total: number;
 }
 
 // ── Bead drill-in (td-384rhs) ─────────────────────────────────────────────
