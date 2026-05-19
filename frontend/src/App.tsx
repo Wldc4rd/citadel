@@ -5,6 +5,7 @@ import { AgentsPage } from './routes/Agents';
 import { AgentDetailPage } from './routes/AgentDetail';
 import { BeadsPage } from './routes/Beads';
 import { BeadDetailPage } from './routes/BeadDetail';
+import { KanbanPage } from './routes/Kanban';
 import { MailPage } from './routes/Mail';
 import { ActivityPage } from './routes/Activity';
 import { HealthPage } from './routes/Health';
@@ -20,6 +21,7 @@ export function App() {
           <Route path="/agents/:slug" element={<AgentDetailPage />} />
           <Route path="/beads" element={<BeadsPage />} />
           <Route path="/beads/:beadId" element={<BeadDetailPage />} />
+          <Route path="/kanban" element={<KanbanPage />} />
           <Route path="/mail" element={<MailPage />} />
           <Route path="/activity" element={<ActivityPage />} />
           <Route path="/health" element={<HealthPage />} />

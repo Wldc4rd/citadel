@@ -11,6 +11,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: '/', label: 'Cockpit', hint: 'overview + common knobs', end: true },
+  { to: '/kanban', label: 'Kanban', hint: 'ownership-state board' },
   { to: '/agents', label: 'Agents', hint: 'sessions, peek, nudge' },
   { to: '/beads', label: 'Beads', hint: 'queued work; filtered' },
   { to: '/mail', label: 'Mail', hint: 'view as any agent' },
