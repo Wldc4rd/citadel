@@ -12,6 +12,7 @@ import type {
   DoltNomsTrend,
   AdminAction,
   AdminActionResult,
+  BeadDetailResponse,
   PipelineStageCounts,
   ThroughputTrend,
   ApiError,
@@ -103,6 +104,9 @@ export const api = {
   },
   nudgeBead(id: string): Promise<{ ok: true; stdout: string }> {
     return request('POST', `/api/beads/${encodeURIComponent(id)}/nudge`, {});
+  },
+  beadDetail(id: string): Promise<BeadDetailResponse> {
+    return request('GET', `/api/beads/${encodeURIComponent(id)}`);
   },
   listMail(box: 'inbox' | 'sent' | 'all', alias: string): Promise<{ items: GcMailItem[]; total?: number }> {
     const qs = new URLSearchParams({ box, alias }).toString();

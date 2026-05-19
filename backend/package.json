@@ -11,8 +11,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "citadel-shared": "*",
     "express": "^4.21.2",
-    "citadel-shared": "*"
+    "marked": "^18.0.4"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",

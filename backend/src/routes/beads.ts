@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import type { GcBead } from 'citadel-shared';
+import type { BeadDetailRaw, BeadDetailResponse, GcBead } from 'citadel-shared';
 import type { GcClient } from '../gc-client.js';
-import { execBeadAction, ExecError } from '../exec.js';
+import { execBdShow, execBeadAction, ExecError } from '../exec.js';
+import { renderMarkdownSafe } from '../markdown.js';
 import { recordAudit } from '../audit.js';
 
 // v0 hardcoded spam filter. Comments here are the load-bearing
@@ -20,7 +21,9 @@ function defaultBeadFilter(bead: GcBead): boolean {
   return true;
 }
 
-const BEAD_ID_RE = /^(td|th|jt)-[a-z0-9-]{3,32}$/;
+// Must mirror BEAD_ID_RE in exec.ts so claim/close/nudge (write) and
+// the drill-in /:id (read) accept the same prefix set: td/th/jt/cd/thriva.
+const BEAD_ID_RE = /^(td|th|jt|cd|thriva)-[a-z0-9-]{3,32}$/;
 
 // td-7t24i6 fix: gc default /beads limit is 50, far below the city's working
 // set (~2139 total, ~183 eng-only). Pull a wide window so the spam filter
@@ -29,7 +32,7 @@ const BEAD_ID_RE = /^(td|th|jt)-[a-z0-9-]{3,32}$/;
 // the supervisor returns more.
 const BEADS_FETCH_LIMIT = 1000;
 
-export function beadsRouter(gc: GcClient): Router {
+export function beadsRouter(gc: GcClient, cityPath: string): Router {
   const router = Router();
 
   router.get('/', async (req, res) => {
@@ -52,6 +55,84 @@ export function beadsRouter(gc: GcClient): Router {
       res
         .status(502)
         .json({ error: 'failed to list beads', kind: 'upstream', details: { message: (err as Error).message } });
+    }
+  });
+
+  // GET /:id — bead drill-in (td-384rhs). Reads the FULL bead record via
+  // the bd CLI. Supervisor's HTTP /v0/city/{name}/bead/{id} omits
+  // design/notes/closed_at/updated_at/owner — fields the detail page needs.
+  // Markdown fields (description/design/notes) are rendered server-side
+  // through markdown.ts's strict-allowlist sanitiser so the frontend can
+  // dangerouslySetInnerHTML the rendered_* fields without further escaping.
+  router.get('/:id', async (req, res) => {
+    const id = req.params.id;
+    if (!BEAD_ID_RE.test(id)) {
+      res.status(400).json({ error: 'invalid bead id', kind: 'validation' });
+      return;
+    }
+    try {
+      const result = await execBdShow(cityPath, id);
+      if (result.exitCode !== 0) {
+        // bd show on a missing bead: exit=1, stderr="Error fetching <id>:
+        // no issue found matching <id>", stdout=JSON {"error": "no
+        // issues found matching the provided IDs", schema_version: 1}.
+        // Parse stdout first (structured); fall back to stderr regex.
+        let notFound = false;
+        if (result.stdout.length > 0) {
+          try {
+            const parsed = JSON.parse(result.stdout) as { error?: string };
+            if (typeof parsed?.error === 'string' && /no issue.*found|not found/i.test(parsed.error)) {
+              notFound = true;
+            }
+          } catch {
+            /* not JSON — fall through to stderr check */
+          }
+        }
+        if (!notFound) {
+          notFound = /no issue.*found|not found|no such issue|does not exist/i.test(result.stderr);
+        }
+        res.status(notFound ? 404 : 502).json({
+          error: notFound ? 'bead not found' : `gc bd show failed with exit ${result.exitCode}`,
+          kind: notFound ? 'not_found' : 'upstream',
+          details: notFound ? undefined : { stderr: result.stderr.slice(0, 1024) },
+        });
+        return;
+      }
+      let bead: BeadDetailRaw;
+      try {
+        const parsed = JSON.parse(result.stdout);
+        bead = (Array.isArray(parsed) ? parsed[0] : parsed) as BeadDetailRaw;
+        if (!bead || typeof bead !== 'object' || typeof bead.id !== 'string') {
+          throw new Error('unexpected bd show shape');
+        }
+      } catch (parseErr) {
+        res.status(502).json({
+          error: 'failed to parse bd show output',
+          kind: 'upstream',
+          details: { message: (parseErr as Error).message },
+        });
+        return;
+      }
+      const payload: BeadDetailResponse = {
+        bead,
+        description_html: renderMarkdownSafe(bead.description ?? ''),
+        design_html: renderMarkdownSafe(bead.design ?? ''),
+        notes_html: renderMarkdownSafe(bead.notes ?? ''),
+      };
+      void recordAudit({
+        type: 'dashboard.fetch',
+        endpoint: 'GET /api/beads/:id',
+        parsed_args: { bead_id: id },
+        duration_ms: result.durationMs,
+      });
+      res.json(payload);
+    } catch (err) {
+      if (err instanceof ExecError) {
+        const status = err.kind === 'validation' ? 400 : err.kind === 'timeout' ? 504 : 500;
+        res.status(status).json({ error: err.message, kind: err.kind });
+        return;
+      }
+      res.status(500).json({ error: (err as Error).message, kind: 'internal' });
     }
   });
 

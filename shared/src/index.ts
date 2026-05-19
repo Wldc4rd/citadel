@@ -289,6 +289,66 @@ export interface GcEventList {
   next?: number;
 }
 
+// ── Bead drill-in (td-384rhs) ─────────────────────────────────────────────
+
+/**
+ * One dependency edge as the bead-show CLI returns it. Verified at
+ * impl time: `gc bd show <id> --json` emits dependencies as a list of
+ * FULL bead objects (with description/design/notes etc.) annotated
+ * with a `dependency_type` field. The drill-in only uses the title /
+ * status to render a depth-1 link; other fields are pass-through and
+ * not part of the type contract.
+ */
+export interface BeadDependency {
+  /** The other bead's id (this is the dependee, not the source). */
+  id: BeadId;
+  title?: string;
+  status?: BeadStatus;
+  /** "blocks" | "related" | future kinds. */
+  dependency_type?: string;
+}
+
+/**
+ * Full bead record as returned by `gc bd show --json` — strictly richer
+ * than the supervisor's HTTP /v0/city/{name}/bead/{id} response
+ * (supervisor omits design/notes/closed_at/updated_at/owner). The
+ * dashboard's /api/beads/:id reads from the CLI to surface the missing
+ * fields.
+ */
+export interface BeadDetailRaw extends GcBead {
+  /** Architect's design notes, markdown. */
+  design?: string;
+  /** Free-form notes, often appended over time. Markdown. */
+  notes?: string;
+  /** When the bead was closed (refinery sets on merge). */
+  closed_at?: IsoTimestamp;
+  /** ISO of most-recent claim/state-transition. */
+  started_at?: IsoTimestamp;
+  /** Filer / responsible party (often != assignee). */
+  owner?: string;
+  /** Who originally filed the bead. */
+  created_by?: string;
+  /** Why the bead was closed (refinery sets `merged to <sha>`, etc.). */
+  close_reason?: string;
+  dependencies?: BeadDependency[];
+}
+
+/**
+ * Response shape for /api/beads/:id — the raw bead record plus
+ * server-side-rendered safe HTML for the three markdown fields.
+ * Frontend renders rendered_* via dangerouslySetInnerHTML; raw_* is
+ * available for "view source" or future export.
+ */
+export interface BeadDetailResponse {
+  bead: BeadDetailRaw;
+  /** HTML rendered from bead.description (markdown). Empty when missing. */
+  description_html: string;
+  /** HTML rendered from bead.design (markdown). Empty when missing. */
+  design_html: string;
+  /** HTML rendered from bead.notes (markdown). Empty when missing. */
+  notes_html: string;
+}
+
 // ── Cockpit view (td-a40qsy) ──────────────────────────────────────────────
 
 /**
