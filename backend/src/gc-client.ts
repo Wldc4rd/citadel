@@ -59,7 +59,7 @@ export class GcClient {
 
   async listBeads(
     signal?: AbortSignal,
-    params?: { limit?: number },
+    params?: { limit?: number; status?: 'closed' | 'open' | 'in_progress' | 'blocked' },
   ): Promise<GcBeadList> {
     // td-7t24i6 (Charlie's corrected diagnosis): gc supervisor defaults
     // /beads to limit=50, which is far below the city's working set
@@ -67,8 +67,17 @@ export class GcClient {
     // operates on a 50-item window and Charlie sees an undercount.
     // Pass an explicit large limit to cover the working set; the spam
     // filter shrinks back down on the client side.
+    //
+    // td-a40qsy: supervisor's default /beads response excludes status=closed
+    // (verified: a no-filter limit=1000 returned 987 open + 13 in_progress,
+    // 0 closed despite ~30k closed in the store). For the cockpit's
+    // throughput-trend endpoint we explicitly pass status=closed to get the
+    // most-recently-closed window. Pipeline-stage-counts uses the default
+    // (open-ish) view so the spam filter has the same input as the Beads
+    // page.
     const search = new URLSearchParams();
     if (params?.limit) search.set('limit', String(params.limit));
+    if (params?.status) search.set('status', params.status);
     const qs = search.toString();
     const path = `/beads${qs.length > 0 ? `?${qs}` : ''}`;
     return this.getJson<GcBeadList>(this.cityPath(path), signal);

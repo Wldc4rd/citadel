@@ -16,6 +16,13 @@ export interface AdminConfig {
   gcSupervisorUrl: string;
   /** Name of the city this admin dashboard manages. */
   cityName: string;
+  /**
+   * Filesystem path to the city root (the dir holding city.toml). Used
+   * by shell-exec paths that need `gc --city=<path>` because gc's name
+   * resolution treats `--city=<name>` as a relative path, not a
+   * registered-city lookup.
+   */
+  cityPath: string;
   /** Path to .gc/events.jsonl for audit-log append. */
   auditLogPath: string;
   /**
@@ -48,6 +55,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AdminConfig {
     extraAllowedHosts,
     gcSupervisorUrl: (env.GC_SUPERVISOR_URL ?? 'http://127.0.0.1:8372').replace(/\/+$/, ''),
     cityName: env.GC_CITY_NAME ?? 'thriva-dev',
+    cityPath: env.GC_CITY_PATH ?? '/home/charlie/thriva-dev',
     auditLogPath:
       env.ADMIN_AUDIT_LOG_PATH ?? '/home/charlie/thriva-dev/.gc/events.jsonl',
     // Default reflects gc's bd-store layout: <city>/.beads/dolt/<rig>/...

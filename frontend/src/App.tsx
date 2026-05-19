@@ -1,5 +1,6 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import { CockpitPage } from './routes/Cockpit';
 import { AgentsPage } from './routes/Agents';
 import { BeadsPage } from './routes/Beads';
 import { MailPage } from './routes/Mail';
@@ -12,7 +13,7 @@ export function App() {
     <ViewingAsProvider>
       <Layout>
         <Routes>
-          <Route path="/" element={<Navigate to="/agents" replace />} />
+          <Route path="/" element={<CockpitPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/beads" element={<BeadsPage />} />
           <Route path="/mail" element={<MailPage />} />

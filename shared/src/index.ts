@@ -285,6 +285,78 @@ export interface GcEventList {
   next?: number;
 }
 
+// ── Cockpit view (td-a40qsy) ──────────────────────────────────────────────
+
+/**
+ * Bucketed bead-closure throughput. Buckets are oldest-first; each
+ * `count` is the number of beads whose `closed_at` falls in
+ * [bucket_start, bucket_start + 1h). The last bucket may be partial when
+ * `as_of` lands mid-hour.
+ */
+export interface ThroughputTrend {
+  /** ISO of when this was computed; basis for "stale" UX. */
+  as_of: IsoTimestamp;
+  /** Window in hours (typically 6). */
+  window_hours: number;
+  buckets: Array<{
+    /** Start of the hour bucket, ISO (UTC, top-of-hour). */
+    start: IsoTimestamp;
+    count: number;
+  }>;
+}
+
+/**
+ * Snapshot of how many beads currently sit at each pipeline stage.
+ * Stage names come from the city's label/status conventions:
+ *   - needs-arch          : architect needs to look
+ *   - needs-impl          : any needs-impl:* label (lumped)
+ *   - needs-review        : reviewer queue
+ *   - needs-changes       : back to implementer
+ *   - in_progress         : claimed and being worked
+ *   - blocked             : explicitly blocked
+ *   - other_open          : anything else still open
+ *
+ * Counts apply the engineering-only spam filter (issue_type in
+ * {feature,bug,task,docs}, no `gc:` labels) so the numbers match what
+ * Charlie sees on the Beads view.
+ */
+export interface PipelineStageCounts {
+  as_of: IsoTimestamp;
+  stages: {
+    needs_arch: number;
+    needs_impl: number;
+    needs_review: number;
+    needs_changes: number;
+    in_progress: number;
+    blocked: number;
+    other_open: number;
+  };
+  /** Total of all stages above (= open eng beads). */
+  total_open: number;
+}
+
+/**
+ * The set of destructive city-level actions exposed by /api/admin/*.
+ * Names map 1:1 to the route paths.
+ */
+export type AdminAction =
+  | 'pause-polecats'
+  | 'resume-polecats'
+  | 'stop-city'
+  | 'restart-city';
+
+export interface AdminActionResult {
+  ok: true;
+  /** The gc command that was run, joined by spaces. For confirmation in UI. */
+  command: string;
+  /** stdout slice (capped). Surfacing to UI so Charlie can confirm the effect. */
+  stdout: string;
+  /** Optional stderr slice when the command emitted any. */
+  stderr?: string;
+  /** Wall-clock ms the command took. */
+  duration_ms: number;
+}
+
 // ── Admin-dashboard internal API responses ───────────────────────────────
 
 /** Wrapped error returned by the backend on any 4xx/5xx. */

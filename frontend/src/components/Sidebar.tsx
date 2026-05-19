@@ -5,9 +5,12 @@ interface NavItem {
   to: string;
   label: string;
   hint: string;
+  /** When true, NavLink does end-match — needed for '/' which is a prefix of every route. */
+  end?: boolean;
 }
 
 const NAV: NavItem[] = [
+  { to: '/', label: 'Cockpit', hint: 'overview + common knobs', end: true },
   { to: '/agents', label: 'Agents', hint: 'sessions, peek, nudge' },
   { to: '/beads', label: 'Beads', hint: 'queued work; filtered' },
   { to: '/mail', label: 'Mail', hint: 'view as any agent' },
@@ -35,6 +38,7 @@ export function Sidebar() {
           <li key={item.to}>
             <NavLink
               to={item.to}
+              end={item.end}
               className={({ isActive }) =>
                 `block rounded-md px-2 py-1.5 text-sm transition-colors ${
                   isActive
