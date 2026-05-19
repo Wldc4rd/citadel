@@ -112,9 +112,13 @@ export function HealthPage() {
         <div className="panel-body">
           {trend === null ? (
             <p className="text-sm text-ink-300 italic">Loading…</p>
-          ) : !trend.available ? (
+          ) : !trend.available && trend.source === null ? (
             <p className="text-sm text-ink-300 rounded-md border border-ink-700 bg-ink-900/40 px-3 py-2 italic">
-              Metric source not yet wired (mechanic surgical-ask pending). Ring buffer is running; samples will appear once <code className="font-sans text-ink-200">sampleDoltNomsSize()</code> is implemented.
+              Sampler disabled. Set <code className="font-sans text-ink-200">ADMIN_DOLT_NOMS_ROOT</code> to enable.
+            </p>
+          ) : !trend.available && trend.source !== null ? (
+            <p className="text-sm text-warn-500 rounded-md border border-warn-500/30 bg-warn-500/10 px-3 py-2 italic">
+              Configured source <code className="font-sans text-warn-500">{trend.source}</code> is not reachable. Sampler will retry every 10 min.
             </p>
           ) : trend.samples.length === 0 ? (
             <p className="text-sm text-ink-300 italic">

@@ -18,6 +18,14 @@ export interface AdminConfig {
   cityName: string;
   /** Path to .gc/events.jsonl for audit-log append. */
   auditLogPath: string;
+  /**
+   * Root directory of the beads' Dolt store. The Health view's 24h
+   * sparkline samples this tree's total file size every 10 minutes
+   * (per-rig subdirs sum to the city's full bd footprint). Set to
+   * empty string to disable the sampler (size feature degrades to the
+   * existing "metric source not yet wired" empty-state UX).
+   */
+  doltNomsRoot: string;
   /** Path to the dist/ of the frontend build, served by express.static. */
   frontendDistPath: string;
   /** Kill-switch: set to '1' to refuse to start. */
@@ -42,6 +50,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AdminConfig {
     cityName: env.GC_CITY_NAME ?? 'thriva-dev',
     auditLogPath:
       env.ADMIN_AUDIT_LOG_PATH ?? '/home/charlie/thriva-dev/.gc/events.jsonl',
+    // Default reflects gc's bd-store layout: <city>/.beads/dolt/<rig>/...
+    // Per-rig subdirs roll up to the city's full dolt footprint when the
+    // walker sums all file sizes under this root.
+    doltNomsRoot:
+      env.ADMIN_DOLT_NOMS_ROOT ?? '/home/charlie/thriva-dev/.beads/dolt',
     frontendDistPath: env.ADMIN_FRONTEND_DIST ?? '../frontend/dist',
     disabled: env.THRIVA_ADMIN_DASHBOARD_DISABLED === '1',
   };
