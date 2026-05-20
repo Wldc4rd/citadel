@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type {
   BeadDetailResponse,
@@ -27,6 +27,27 @@ const REFRESH_INTERVAL_MS = 30_000;
 const TICK_MS = 5_000;
 const STALE_AMBER_MS = 30_000;
 const STALE_RED_MS = 120_000;
+// cd-6w92: animation + activity feed for column transitions. Cards
+// that move column-to-column get a transient ring highlight; the feed
+// below the board retains the last N moves for "I blinked, what just
+// changed?".
+const MOVED_HIGHLIGHT_MS = 2_500;
+const FEED_MAX_ENTRIES = 15;
+
+/**
+ * cd-6w92: one column-to-column transition observed between two
+ * refreshes. fromColumn/toColumn are the KanbanResponse columns the
+ * card was in then-and-now; ts is when the diff was detected (client
+ * wall clock; the bead's actual transition time is somewhere within
+ * the previous refresh interval).
+ */
+interface KanbanTransition {
+  beadId: string;
+  title: string;
+  fromColumn: KanbanColumn;
+  toColumn: KanbanColumn;
+  ts: number;
+}
 
 const COLUMN_LABELS: Record<KanbanColumn, string> = {
   mayor_plate: 'Mayor Plate',
@@ -86,6 +107,20 @@ export function KanbanPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
+  // cd-6w92: card-id → column it was in on the last refresh. Stored in
+  // a ref because the diff happens INSIDE the effect that reacts to
+  // `data`; the ref doesn't need to trigger re-renders. First-load
+  // sentinel handled inline: an empty map means "no prior state, skip
+  // the diff" so every card on first paint doesn't generate a
+  // transition.
+  const prevLocationsRef = useRef<Map<string, KanbanColumn>>(new Map());
+  const [transitions, setTransitions] = useState<KanbanTransition[]>([]);
+  // Set of card ids currently in the "just moved" highlight window.
+  // Cleared per-card after MOVED_HIGHLIGHT_MS; timers stored in
+  // movedTimersRef so unmount can clean up.
+  const [recentlyMovedIds, setRecentlyMovedIds] = useState<ReadonlySet<string>>(new Set());
+  const movedTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -120,6 +155,8 @@ export function KanbanPage() {
 
   const sseState = useGcEventRefresh(['bead.', 'session.'], () => void refresh());
 
+  // cd-ykl9: lazy-loaded detail popover handlers (modal open/close).
+  // Orthogonal to cd-6w92's diff effect below; coexist on the same page.
   const handleDetail = useCallback(async (beadId: string) => {
     setDetailFor(beadId);
     setDetail(null);
@@ -145,6 +182,77 @@ export function KanbanPage() {
     setDetailFor(null);
     setDetail(null);
     setDetailError(null);
+  }, []);
+
+  // cd-6w92: detect column transitions whenever `data` changes. Diff
+  // current cards-by-column against the previous snapshot; emit one
+  // KanbanTransition per card whose column changed. Skip the first
+  // load (empty prev map) — every card on first paint would otherwise
+  // count as "moved".
+  useEffect(() => {
+    if (data === null) return;
+    const currentLocations = new Map<string, KanbanColumn>();
+    const titleById = new Map<string, string>();
+    for (const col of KANBAN_COLUMNS) {
+      for (const c of data.columns[col]) {
+        currentLocations.set(c.id, col);
+        titleById.set(c.id, c.title);
+      }
+    }
+    const prev = prevLocationsRef.current;
+    // First load — populate prev silently.
+    if (prev.size > 0) {
+      const moved: KanbanTransition[] = [];
+      const movedIds: string[] = [];
+      for (const [id, currentCol] of currentLocations.entries()) {
+        const prevCol = prev.get(id);
+        if (prevCol !== undefined && prevCol !== currentCol) {
+          moved.push({
+            beadId: id,
+            title: titleById.get(id) ?? '(no title)',
+            fromColumn: prevCol,
+            toColumn: currentCol,
+            ts: Date.now(),
+          });
+          movedIds.push(id);
+        }
+      }
+      if (moved.length > 0) {
+        // Prepend newest first; cap to FEED_MAX_ENTRIES.
+        setTransitions((existing) => [...moved.reverse(), ...existing].slice(0, FEED_MAX_ENTRIES));
+        // Highlight moved cards briefly. Per-card timer so consecutive
+        // moves don't truncate each other's animations.
+        setRecentlyMovedIds((existing) => {
+          const next = new Set(existing);
+          for (const id of movedIds) next.add(id);
+          return next;
+        });
+        for (const id of movedIds) {
+          const prevTimer = movedTimersRef.current.get(id);
+          if (prevTimer) clearTimeout(prevTimer);
+          const t = setTimeout(() => {
+            setRecentlyMovedIds((existing) => {
+              if (!existing.has(id)) return existing;
+              const next = new Set(existing);
+              next.delete(id);
+              return next;
+            });
+            movedTimersRef.current.delete(id);
+          }, MOVED_HIGHLIGHT_MS);
+          movedTimersRef.current.set(id, t);
+        }
+      }
+    }
+    prevLocationsRef.current = currentLocations;
+  }, [data]);
+
+  // Clean up any pending highlight timers on unmount.
+  useEffect(() => {
+    const timers = movedTimersRef.current;
+    return () => {
+      for (const t of timers.values()) clearTimeout(t);
+      timers.clear();
+    };
   }, []);
 
   const staleness = fetchedAt === null
@@ -205,11 +313,20 @@ export function KanbanPage() {
               cards={data.columns[col]}
               now={now}
               onDetail={handleDetail}
+              recentlyMovedIds={recentlyMovedIds}
             />
           ))}
         </div>
       )}
 
+      {/* cd-6w92: rolling activity feed sits below the board. Lives as
+          long as the page session; clears on full reload. Per the bead's
+          design recommendation, feed (panel) is primary; a toast layer
+          could be added later as a quick-attention surface. */}
+      <ActivityFeed transitions={transitions} now={now} />
+
+      {/* cd-ykl9: lazy-loaded quick-detail modal. Triggered by the ⓘ on
+          each Card; orthogonal to the activity feed above. */}
       <Modal
         open={detailFor !== null}
         onClose={closeDetail}
@@ -239,16 +356,71 @@ export function KanbanPage() {
   );
 }
 
+// cd-6w92: activity feed renders the rolling list of recent transitions.
+// Empty state is muted ("waiting for the next move…") so the panel
+// surface is always present, signalling 'this is the spot to watch'.
+function ActivityFeed({
+  transitions,
+  now,
+}: {
+  transitions: ReadonlyArray<KanbanTransition>;
+  now: number;
+}) {
+  return (
+    <section className="rounded-md border border-ink-700 bg-ink-800/60">
+      <header className="px-3 py-1.5 border-b border-ink-700 flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wider text-ink-200">
+          Recent moves
+        </span>
+        <span className="text-[10px] text-ink-400">
+          {transitions.length === 0
+            ? 'waiting for the next move…'
+            : `${transitions.length} of last ${FEED_MAX_ENTRIES}`}
+        </span>
+      </header>
+      {transitions.length === 0 ? (
+        <p className="px-3 py-2 text-[11px] text-ink-400 italic">
+          Detected once a card changes column between refreshes (~30s tick + SSE).
+        </p>
+      ) : (
+        <ul className="divide-y divide-ink-700">
+          {transitions.map((t) => (
+            <li key={`${t.beadId}-${t.ts}`} className="px-3 py-1.5 flex items-baseline gap-2 text-xs">
+              <Link
+                to={`/beads/${encodeURIComponent(t.beadId)}`}
+                className="font-sans text-[10px] text-accent-500 hover:underline whitespace-nowrap"
+              >
+                {t.beadId}
+              </Link>
+              <span className="text-ink-200 truncate flex-1" title={t.title}>{t.title}</span>
+              <span className="text-[10px] text-ink-300 whitespace-nowrap">
+                <span className="text-ink-400">{COLUMN_LABELS[t.fromColumn]}</span>
+                <span className="mx-1">→</span>
+                <span className="text-ink-100 font-medium">{COLUMN_LABELS[t.toColumn]}</span>
+              </span>
+              <span className="text-[10px] text-ink-400 tabular-nums whitespace-nowrap">
+                {formatRelativeNow(new Date(t.ts).toISOString(), now)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function Column({
   col,
   cards,
   now,
   onDetail,
+  recentlyMovedIds,
 }: {
   col: KanbanColumn;
   cards: KanbanCard[];
   now: number;
   onDetail: (beadId: string) => void;
+  recentlyMovedIds: ReadonlySet<string>;
 }) {
   return (
     <div className={`shrink-0 w-64 rounded-md border bg-ink-800 ${COLUMN_TONE[col]}`}>
@@ -266,7 +438,13 @@ function Column({
           <li className="text-[11px] text-ink-400 italic text-center py-2">empty</li>
         ) : (
           cards.map((c) => (
-            <Card key={c.id} card={c} now={now} onDetail={onDetail} />
+            <Card
+              key={c.id}
+              card={c}
+              now={now}
+              onDetail={onDetail}
+              isRecentlyMoved={recentlyMovedIds.has(c.id)}
+            />
           ))
         )}
       </ul>
@@ -278,17 +456,24 @@ function Card({
   card,
   now,
   onDetail,
+  isRecentlyMoved,
 }: {
   card: KanbanCard;
   now: number;
   onDetail: (beadId: string) => void;
+  /** cd-6w92: card moved between columns within MOVED_HIGHLIGHT_MS — flash a ring. */
+  isRecentlyMoved: boolean;
 }) {
   // cd-8g9g: the bottom row (assignee + last_active) lives OUTSIDE the
   // bead Link so the assignee can carry its own /agents/<assignee> Link
   // without nesting <a>s (invalid HTML — browsers would close the outer
   // <a> when they hit the inner one and the card click would break).
   return (
-    <li className="rounded border border-ink-700 bg-ink-900/40 hover:bg-ink-900 transition-colors">
+    <li
+      className={`rounded border border-ink-700 bg-ink-900/40 hover:bg-ink-900 transition-all duration-300 ${
+        isRecentlyMoved ? 'ring-2 ring-accent-500/80 shadow-md shadow-accent-500/30' : ''
+      }`}
+    >
       <Link
         to={`/beads/${encodeURIComponent(card.id)}`}
         className="block px-2 pt-1.5 pb-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 rounded"
