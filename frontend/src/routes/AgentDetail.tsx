@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import type { GcBead, GcSession, TranscriptResult } from 'citadel-shared';
+import type { GcBead, GcMailItem, GcSession, TranscriptResult } from 'citadel-shared';
 import { api, ApiClientError } from '../api/client';
 import { Button } from '../components/Button';
 import {
@@ -9,6 +9,7 @@ import {
 } from '../components/SessionPeekContent';
 import { useGcEventRefresh } from '../hooks/useGcEvents';
 import { usePageTitle } from '../hooks/usePageTitle';
+import { useViewingAs } from '../contexts/ViewingAsContext';
 
 // Agent drill-in page (td-uxfwox). Route: /agents/:slug where slug is
 // the session's session_name (always URL-safe). Falls back to matching
@@ -32,10 +33,25 @@ const PEEK_AUTO_REFRESH_MS = 7_000;
 const SESSIONS_REFRESH_MS = 15_000;
 const BEADS_REFRESH_MS = 30_000;
 const DEFAULT_NUDGE_MESSAGE = 'check work';
+// cd-wlav: chat panel cadence + size caps. 10s poll matches the
+// "feels live but doesn't hammer the supervisor" trade-off of the
+// rest of the cockpit's polling; max 200 messages is generous for
+// a single human↔agent thread (cap exists so a runaway agent talker
+// doesn't bloat the panel).
+const CHAT_REFRESH_MS = 10_000;
+const CHAT_MESSAGE_CAP = 200;
+const CHAT_BODY_MAXLEN = 16 * 1024;
+// Wire identity for outbound: dashboard owner is pinned to 'human' on
+// the wire (security_researcher td-wisp-eb0pn physical separation).
+// We also match inbound mail addressed to 'human' as belonging to the
+// owner side of the conversation — same cd-d9db OWNER_ALIASES bridge
+// the mail.ts backend already applies.
+const OWNER_WIRE_ALIAS = 'human';
 
 export function AgentDetailPage() {
   const { slug = '' } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const { viewingAs } = useViewingAs();
 
   const [sessions, setSessions] = useState<GcSession[] | null>(null);
   const [beads, setBeads] = useState<GcBead[] | null>(null);
@@ -49,6 +65,17 @@ export function AgentDetailPage() {
   const [nudging, setNudging] = useState(false);
   const [nudgeFeedback, setNudgeFeedback] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+
+  // cd-wlav: chat thread between dashboard owner and this agent.
+  // Pulled from /api/mail box=all (one wide fetch, filtered client-
+  // side) so the conversation shows BOTH directions regardless of
+  // which alias the user is "viewing as" in the Mail page.
+  const [chatMessages, setChatMessages] = useState<GcMailItem[] | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [chatFetchedAt, setChatFetchedAt] = useState<number | null>(null);
+  const [chatDraft, setChatDraft] = useState('');
+  const [chatSending, setChatSending] = useState(false);
+  const [chatSendError, setChatSendError] = useState<string | null>(null);
 
   const decoded = useMemo(() => decodeURIComponent(slug), [slug]);
 
@@ -174,6 +201,92 @@ export function AgentDetailPage() {
     }, PEEK_AUTO_REFRESH_MS);
     return () => clearInterval(tick);
   }, [session, refreshPeek]);
+
+  // cd-wlav: agent's "chat alias" — the mailbox name we send to and
+  // expect replies from. The supervisor's mail rows use alias-style
+  // (e.g. 'thriva/devpipeline.architect') so we prefer session.alias;
+  // fall back to session_name then id for sessions that don't have an
+  // alias yet.
+  const agentChatAlias = useMemo<string | null>(() => {
+    if (!session) return null;
+    return session.alias ?? session.session_name ?? session.id ?? null;
+  }, [session]);
+
+  const refreshChat = useCallback(async () => {
+    if (!agentChatAlias) return;
+    setChatError(null);
+    try {
+      // Wide fetch — box='all' returns the supervisor's mail window
+      // unfiltered by alias (the alias arg is ignored when box='all'
+      // per backend/src/routes/mail.ts::filterByBox). Filtering
+      // happens locally in chatThread useMemo below.
+      const result = await api.listMail('all', viewingAs.ownerAlias);
+      // listMail returns the existing shape {items, total?, upstream_total?};
+      // store the raw items + let chatThread useMemo do the work.
+      setChatMessages(result.items);
+      setChatFetchedAt(Date.now());
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : 'chat fetch failed');
+    }
+  }, [agentChatAlias, viewingAs.ownerAlias]);
+
+  useEffect(() => {
+    if (!agentChatAlias) return;
+    void refreshChat();
+    const tick = setInterval(() => {
+      if (!document.hidden) void refreshChat();
+    }, CHAT_REFRESH_MS);
+    return () => clearInterval(tick);
+  }, [agentChatAlias, refreshChat]);
+
+  // cd-wlav: filter the wide-fetch mail to messages BETWEEN the
+  // dashboard owner and this specific agent. Owner side includes the
+  // configured display alias AND 'human' (wire identity per cd-d9db
+  // OWNER_ALIASES bridge — Charlie display = 'charlie' but wire-from =
+  // 'human', and the agent's reply may go to either alias).
+  const chatThread = useMemo<GcMailItem[]>(() => {
+    if (chatMessages === null || !agentChatAlias) return [];
+    const ownerSet = new Set([viewingAs.ownerAlias.toLowerCase(), OWNER_WIRE_ALIAS]);
+    const agentL = agentChatAlias.toLowerCase();
+    const filtered = chatMessages.filter((m) => {
+      const from = (m.from || '').toLowerCase();
+      const to = (m.to || '').toLowerCase();
+      return (ownerSet.has(from) && to === agentL) || (from === agentL && ownerSet.has(to));
+    });
+    // Oldest first for chat-style chronological display. Cap at the
+    // chat message limit to keep render cheap on long histories.
+    filtered.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    return filtered.slice(-CHAT_MESSAGE_CAP);
+  }, [chatMessages, agentChatAlias, viewingAs.ownerAlias]);
+
+  const handleChatSend = useCallback(async () => {
+    if (!agentChatAlias) return;
+    const body = chatDraft.trim();
+    if (body.length === 0) return;
+    setChatSending(true);
+    setChatSendError(null);
+    try {
+      // Subject is auto-derived from the first ~60 chars of body so
+      // the rolled-up mail thread (when viewed via /mail) still has a
+      // human-readable subject. Body holds the actual message.
+      const subject = body.split('\n')[0]?.slice(0, 60) || '[chat]';
+      await api.sendMail({ to: agentChatAlias, subject, body });
+      setChatDraft('');
+      // Immediate refresh so the just-sent message renders without
+      // waiting for the next tick.
+      void refreshChat();
+    } catch (err) {
+      const msg =
+        err instanceof ApiClientError
+          ? `${err.status} ${err.message}`
+          : err instanceof Error
+            ? err.message
+            : 'send failed';
+      setChatSendError(msg);
+    } finally {
+      setChatSending(false);
+    }
+  }, [agentChatAlias, chatDraft, refreshChat]);
 
   const handleNudge = useCallback(async () => {
     if (session === null) return;
@@ -308,7 +421,30 @@ export function AgentDetailPage() {
         </div>
       </div>
 
+      {/* Directives first (read-once context: what the agent is told
+          to do); chat below (active-engagement: what we're saying to
+          each other right now). */}
       <DirectivesPanel agentAlias={session.alias ?? session.template ?? null} />
+
+      {/* cd-wlav: chat thread with this agent. Two-way via mail — user
+          input goes through /api/mail-send (wire identity pinned to
+          'human'); agent replies (whenever the agent's loop reads
+          mail) come back via /api/mail box=all + filter. */}
+      <ChatPanel
+        agentAlias={agentChatAlias}
+        ownerAlias={viewingAs.ownerAlias}
+        messages={chatThread}
+        loaded={chatMessages !== null}
+        fetchedAt={chatFetchedAt}
+        now={now}
+        error={chatError}
+        draft={chatDraft}
+        onDraftChange={setChatDraft}
+        onSend={handleChatSend}
+        sending={chatSending}
+        sendError={chatSendError}
+        canSend={viewingAs.isOwner}
+      />
     </section>
   );
 }
@@ -409,6 +545,175 @@ function DirectivesPanel({ agentAlias }: { agentAlias: string | null }) {
 }
 
 // ── Panels ─────────────────────────────────────────────────────────────
+
+// cd-wlav: chat thread between dashboard owner and this agent.
+// Wraps existing /api/mail (read) + /api/mail-send (write) infra; no
+// new backend endpoints. Sends use the dashboard's mail-send pipeline,
+// which pins --from human (security_researcher td-wisp-eb0pn physical
+// separation). Replies are agent-generated mail addressed back to the
+// owner's alias and/or the wire alias 'human' — chatThread filter
+// upstream matches both directions.
+//
+// SECURITY: each message body is LLM-generated agent content; rendered
+// in <pre> with React-default escaping (no dangerouslySetInnerHTML).
+// Per docs/SECURITY.md XSS posture, that's safe by construction. The
+// prompt-injection notice mirrors the Mail page's threading view.
+function ChatPanel({
+  agentAlias,
+  ownerAlias,
+  messages,
+  loaded,
+  fetchedAt,
+  now,
+  error,
+  draft,
+  onDraftChange,
+  onSend,
+  sending,
+  sendError,
+  canSend,
+}: {
+  agentAlias: string | null;
+  ownerAlias: string;
+  messages: GcMailItem[];
+  loaded: boolean;
+  fetchedAt: number | null;
+  now: number;
+  error: string | null;
+  draft: string;
+  onDraftChange: (v: string) => void;
+  onSend: () => void;
+  sending: boolean;
+  sendError: string | null;
+  /** False when viewing-as another identity — disables the Send button per Mail.tsx's existing physical-separation UX. */
+  canSend: boolean;
+}) {
+  // Auto-scroll to the bottom when new messages arrive (chat-style).
+  // The ref points at a sentinel below the last message — calling
+  // scrollIntoView on it pulls the most recent reply into view.
+  const tailRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (tailRef.current) tailRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [messages.length]);
+
+  if (!agentAlias) return null;
+
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <span className="text-xs uppercase tracking-wider text-ink-300">
+          Chat · <code className="font-sans">{ownerAlias}</code> ↔ <code className="font-sans">{agentAlias}</code>
+        </span>
+        <div className="flex items-center gap-2">
+          {fetchedAt && (
+            <span className="text-[11px] text-ink-300 tabular-nums">
+              refreshed {formatRelativeNow(new Date(fetchedAt).toISOString(), now)}
+            </span>
+          )}
+          {error && <span className="text-[11px] text-error-500">{error}</span>}
+        </div>
+      </div>
+      <div className="panel-body space-y-2">
+        <p className="text-[11px] text-warn-500 bg-warn-500/10 border border-warn-500/30 rounded-md px-2 py-1">
+          Agent replies are LLM-generated and may contain misleading instructions. Auto-refresh {CHAT_REFRESH_MS / 1_000}s.
+        </p>
+        {!loaded ? (
+          <p className="text-xs text-ink-300 italic">Loading chat…</p>
+        ) : messages.length === 0 ? (
+          <p className="text-xs text-ink-300 italic">
+            No messages yet between <code className="font-sans">{ownerAlias}</code> and <code className="font-sans">{agentAlias}</code>.
+            Type below to send the first one.
+          </p>
+        ) : (
+          <ol className="space-y-1.5 max-h-[40vh] overflow-y-auto">
+            {messages.map((m) => (
+              <ChatBubble key={m.id} message={m} ownerAlias={ownerAlias} agentAlias={agentAlias} />
+            ))}
+            <div ref={tailRef} />
+          </ol>
+        )}
+
+        <div className="flex items-stretch gap-2">
+          <textarea
+            value={draft}
+            onChange={(e) => onDraftChange(e.target.value)}
+            placeholder={canSend ? `Message ${agentAlias}…` : `Switch back to ${ownerAlias} to send`}
+            maxLength={CHAT_BODY_MAXLEN}
+            disabled={!canSend || sending}
+            rows={3}
+            onKeyDown={(e) => {
+              // Ctrl/Cmd+Enter sends — common chat ergonomic.
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                if (canSend && !sending) onSend();
+              }
+            }}
+            className="flex-1 min-w-0 bg-ink-900 border border-ink-600 rounded-md px-2 py-1.5 text-xs font-body text-ink-100 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-accent-500 resize-y disabled:opacity-60 disabled:cursor-not-allowed"
+          />
+          <Button
+            tone="accent"
+            size="sm"
+            disabled={!canSend || sending || draft.trim().length === 0}
+            onClick={onSend}
+          >
+            {sending ? 'Sending…' : `Send → ${agentAlias}`}
+          </Button>
+        </div>
+        {sendError && (
+          <p role="alert" className="text-xs text-error-500 bg-error-500/10 border border-error-500/30 rounded-md px-2 py-1">
+            {sendError}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ChatBubble({
+  message,
+  ownerAlias,
+  agentAlias,
+}: {
+  message: GcMailItem;
+  ownerAlias: string;
+  agentAlias: string;
+}) {
+  const fromLower = (message.from || '').toLowerCase();
+  const isOwnerSide =
+    fromLower === ownerAlias.toLowerCase() || fromLower === OWNER_WIRE_ALIAS;
+  const sideClasses = isOwnerSide
+    ? 'border-accent-700/40 bg-accent-700/10 ml-6'
+    : 'border-ink-700 bg-ink-900/40 mr-6';
+  const senderLabel = isOwnerSide ? ownerAlias : agentAlias;
+  return (
+    <li className={`rounded border ${sideClasses} px-2 py-1.5`}>
+      <header className="flex items-baseline justify-between gap-2 text-[10px] text-ink-300 mb-1">
+        <span className={isOwnerSide ? 'text-accent-500 font-medium' : 'text-ink-100 font-medium'}>
+          {senderLabel}
+        </span>
+        <span className="tabular-nums">{formatChatTime(message.created_at)}</span>
+      </header>
+      {message.subject && message.subject !== '[chat]' && !message.body.startsWith(message.subject) && (
+        <p className="text-[11px] text-ink-300 mb-0.5">
+          <span className="text-ink-400">subj: </span>
+          <span className="text-ink-200">{message.subject}</span>
+        </p>
+      )}
+      <pre className="text-xs font-body whitespace-pre-wrap leading-snug text-ink-100">{message.body}</pre>
+    </li>
+  );
+}
+
+function formatChatTime(iso: string): string {
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return '—';
+  return new Date(ms).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
 
 function MetadataPanel({ session, now }: { session: GcSession; now: number }) {
   return (
