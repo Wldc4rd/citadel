@@ -75,7 +75,13 @@ export function useGcEventRefresh(
           setState('open');
           retryDelayMs = 1_000;
         };
-        es.onmessage = (msg: MessageEvent<string>) => {
+        // td-tlo122: the supervisor emits frames with a named event field
+        // (`event: event`) per WHATWG SSE — those dispatch to
+        // addEventListener('event', …), NOT to onmessage (which only sees
+        // unnamed / 'message'-named frames). Bind both so the hook
+        // survives the current convention AND a future switch to
+        // unnamed frames without code change.
+        const handleSseFrame = (msg: MessageEvent<string>) => {
           if (cancelled) return;
           if (msg.lastEventId) lastEventId = msg.lastEventId;
           let parsed: { type?: string } | null = null;
@@ -93,6 +99,8 @@ export function useGcEventRefresh(
             }
           }
         };
+        es.addEventListener('event', handleSseFrame);
+        es.addEventListener('message', handleSseFrame);
         es.onerror = () => {
           if (cancelled) return;
           setState('closed');
