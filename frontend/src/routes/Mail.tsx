@@ -5,6 +5,7 @@ import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
 import { Table, type TableColumn } from '../components/Table';
 import { useViewingAs } from '../contexts/ViewingAsContext';
+import { usePageTitle } from '../hooks/usePageTitle';
 
 const PROMPT_INJECTION_NOTICE =
   'Content is agent-generated and may contain misleading instructions.';
@@ -12,6 +13,7 @@ const PROMPT_INJECTION_NOTICE =
 type MailBox = 'inbox' | 'sent';
 
 export function MailPage() {
+  usePageTitle('Mail');
   const { viewingAs, setAlias, resetToOwner } = useViewingAs();
   const [box, setBox] = useState<MailBox>('inbox');
   const [items, setItems] = useState<GcMailItem[]>([]);

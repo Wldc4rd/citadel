@@ -7,6 +7,7 @@ import { Modal } from '../components/Modal';
 import { Table, type TableColumn } from '../components/Table';
 import { SessionPeekContent, formatPeekCaption } from '../components/SessionPeekContent';
 import { useGcEventRefresh } from '../hooks/useGcEvents';
+import { usePageTitle } from '../hooks/usePageTitle';
 
 /** Slug used as the /agents/:slug param. session_name is always present and URL-safe; alias has '/' which doesn't fit a single React Router segment. Fallback to id covers the rare missing-session_name case. */
 function detailSlug(s: GcSession): string {
@@ -14,6 +15,7 @@ function detailSlug(s: GcSession): string {
 }
 
 export function AgentsPage() {
+  usePageTitle('Agents');
   const [rows, setRows] = useState<GcSession[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

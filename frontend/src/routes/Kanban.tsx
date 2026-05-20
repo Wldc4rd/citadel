@@ -5,6 +5,7 @@ import { KANBAN_COLUMNS } from 'citadel-shared';
 import { api } from '../api/client';
 import { Button } from '../components/Button';
 import { useGcEventRefresh } from '../hooks/useGcEvents';
+import { usePageTitle } from '../hooks/usePageTitle';
 
 // Read-only Kanban (td-wyr6ly). Charlie directive 2026-05-19 17:02 UTC:
 // trello-style board, ownership-state columns, cards link into the
@@ -63,6 +64,7 @@ const COLUMN_HELP: Record<KanbanColumn, string> = {
 };
 
 export function KanbanPage() {
+  usePageTitle('Kanban');
   const [data, setData] = useState<KanbanResponse | null>(null);
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);

@@ -5,6 +5,7 @@ import { api, ApiClientError } from '../api/client';
 import { Button } from '../components/Button';
 import { useGcEventRefresh } from '../hooks/useGcEvents';
 import { useViewingAs } from '../contexts/ViewingAsContext';
+import { usePageTitle } from '../hooks/usePageTitle';
 
 // Bead drill-in (td-384rhs). Route /beads/:beadId.
 //
@@ -43,6 +44,12 @@ export function BeadDetailPage() {
   const [now, setNow] = useState(() => Date.now());
   const [actionRunning, setActionRunning] = useState<'claim' | 'close' | null>(null);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+
+  usePageTitle(
+    detail?.bead
+      ? `Bead · ${detail.bead.id} · ${detail.bead.title.slice(0, 80)}`
+      : `Bead · ${decoded}`,
+  );
 
   const refresh = useCallback(async () => {
     setLoading(true);

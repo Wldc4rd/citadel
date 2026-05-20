@@ -6,6 +6,7 @@ import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
 import { Table, type TableColumn, type SortState } from '../components/Table';
 import { useGcEventRefresh } from '../hooks/useGcEvents';
+import { usePageTitle } from '../hooks/usePageTitle';
 
 // cd-d68p: sort + filter + pagination are now server-side. Cursor is an
 // opaque token from the backend; prev/next come back in the response and
@@ -28,6 +29,7 @@ const KEY_TO_SORT_COL: Record<BeadSortKey, string> = {
 };
 
 export function BeadsPage() {
+  usePageTitle('Beads');
   const [data, setData] = useState<ListBeadsResponse | null>(null);
   const [sort, setSort] = useState<BeadSortKey>('updated_at');
   const [order, setOrder] = useState<BeadSortOrder>('desc');

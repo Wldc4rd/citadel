@@ -3,6 +3,7 @@ import type { DeployRecord, GitCommit, GitView } from 'citadel-shared';
 import { api } from '../api/client';
 import { Button } from '../components/Button';
 import { Table, type TableColumn } from '../components/Table';
+import { usePageTitle } from '../hooks/usePageTitle';
 
 const VIEW_OPTIONS: ReadonlyArray<{ value: GitView; label: string }> = [
   { value: 'recent-main', label: 'recent · main' },
@@ -12,6 +13,7 @@ const VIEW_OPTIONS: ReadonlyArray<{ value: GitView; label: string }> = [
 ];
 
 export function ActivityPage() {
+  usePageTitle('Activity');
   const [view, setView] = useState<GitView>('recent-main');
   const [commits, setCommits] = useState<GitCommit[]>([]);
   const [deploys, setDeploys] = useState<DeployRecord[]>([]);

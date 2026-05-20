@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import type { DoltNomsTrend, SystemHealth } from 'citadel-shared';
 import { api } from '../api/client';
 import { Button } from '../components/Button';
+import { usePageTitle } from '../hooks/usePageTitle';
 
 export function HealthPage() {
+  usePageTitle('Health');
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [trend, setTrend] = useState<DoltNomsTrend | null>(null);
   const [loading, setLoading] = useState(false);

@@ -8,6 +8,7 @@ import {
   formatPeekCaption,
 } from '../components/SessionPeekContent';
 import { useGcEventRefresh } from '../hooks/useGcEvents';
+import { usePageTitle } from '../hooks/usePageTitle';
 
 // Agent drill-in page (td-uxfwox). Route: /agents/:slug where slug is
 // the session's session_name (always URL-safe). Falls back to matching
@@ -119,6 +120,8 @@ export function AgentDetailPage() {
       null
     );
   }, [sessions, decoded]);
+
+  usePageTitle(`Agent · ${session?.alias ?? decoded}`);
 
   // Beads belonging to this agent. Bead-store assignees use mixed
   // formats — match on alias, session_name, or session_id to capture

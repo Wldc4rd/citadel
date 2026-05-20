@@ -17,6 +17,7 @@ import {
   formatPeekCaption,
 } from '../components/SessionPeekContent';
 import { useGcEventRefresh } from '../hooks/useGcEvents';
+import { usePageTitle } from '../hooks/usePageTitle';
 
 // Cockpit (td-a40qsy) — Charlie's primary landing surface. Four panel
 // blocks, each with its own data source + stale-data indicator:
@@ -67,6 +68,7 @@ interface CityConfig {
 }
 
 export function CockpitPage() {
+  usePageTitle('Cockpit');
   const [now, setNow] = useState(() => Date.now());
   const [cityConfig, setCityConfig] = useState<CityConfig | null>(null);
   const [sessions, setSessions] = useState<PanelState<GcSession[]>>(emptyPanel());
