@@ -304,36 +304,51 @@ export function CockpitPage() {
   // cd-uebi: background poll of mayor peek for the inline card preview.
   // Keyed on mayor.id so it re-fires when the mayor session rotates
   // (failover, restart). Same 30s cadence as the rest of the cockpit
-  // polls — see the parent tick effect below.
-  const refreshMayorPeekInline = useCallback(async () => {
+  // polls. AbortController guards against stale-result overwrite per
+  // senior_developer's "ANY POLLING LOOP MUST GUARD AGAINST STALE-
+  // RESULT OVERWRITE" rule (cd-uebi review): if a /peek request out-
+  // lasts the 30s tick, the next tick aborts the previous in-flight
+  // fetch so the older response can't race-resolve and clobber a
+  // newer one. The cancelled flag is belt to the controller's braces
+  // — fetch rejects with AbortError on abort but state-setters still
+  // need to be no-ops if the effect itself has torn down.
+  useEffect(() => {
     if (!mayor) {
       setMayorPeekInline(emptyPanel());
       return;
     }
-    try {
-      const result = await api.peekSession(mayor.id);
-      setMayorPeekInline({ data: result, fetchedAt: Date.now(), error: null });
-    } catch (err) {
-      setMayorPeekInline((prev) => ({
-        ...prev,
-        error: err instanceof Error ? err.message : 'mayor peek failed',
-      }));
-    }
-  }, [mayor]);
+    let cancelled = false;
+    let controller = new AbortController();
 
-  // Initial fetch + re-fetch on mayor change. The tick interval below
-  // refreshes on schedule; this effect handles "mayor just became
-  // known" and "mayor changed sessions".
-  useEffect(() => {
-    void refreshMayorPeekInline();
-  }, [refreshMayorPeekInline]);
+    const tick = async () => {
+      controller.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      try {
+        const result = await api.peekSession(mayor.id, signal);
+        if (cancelled) return;
+        setMayorPeekInline({ data: result, fetchedAt: Date.now(), error: null });
+      } catch (err) {
+        if (cancelled) return;
+        if ((err as { name?: string })?.name === 'AbortError') return;
+        setMayorPeekInline((prev) => ({
+          ...prev,
+          error: err instanceof Error ? err.message : 'mayor peek failed',
+        }));
+      }
+    };
 
-  useEffect(() => {
-    const tick = setInterval(() => {
-      if (!document.hidden) void refreshMayorPeekInline();
+    void tick();
+    const interval = setInterval(() => {
+      if (!document.hidden) void tick();
     }, REFRESH_INTERVAL_MS);
-    return () => clearInterval(tick);
-  }, [refreshMayorPeekInline]);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearInterval(interval);
+    };
+  }, [mayor]);
 
   const handleAdminAction = useCallback(
     async (action: AdminAction) => {

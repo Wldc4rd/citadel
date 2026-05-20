@@ -40,6 +40,7 @@ async function request<T>(
   method: 'GET' | 'POST',
   url: string,
   body?: object,
+  signal?: AbortSignal,
 ): Promise<T> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
@@ -54,6 +55,7 @@ async function request<T>(
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
     credentials: 'same-origin',
+    signal,
   });
   if (!res.ok) {
     let payload: ApiError | null = null;
@@ -83,8 +85,8 @@ export const api = {
   listSessions(): Promise<{ items: GcSession[] }> {
     return request('GET', '/api/sessions');
   },
-  peekSession(id: string): Promise<TranscriptResult> {
-    return request('POST', `/api/sessions/${encodeURIComponent(id)}/peek`, {});
+  peekSession(id: string, signal?: AbortSignal): Promise<TranscriptResult> {
+    return request('POST', `/api/sessions/${encodeURIComponent(id)}/peek`, {}, signal);
   },
   nudgeSession(id: string, message?: string): Promise<{ ok: true; stdout: string; duration_ms: number }> {
     return request('POST', `/api/sessions/${encodeURIComponent(id)}/nudge`, message ? { message } : {});
