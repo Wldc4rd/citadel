@@ -468,7 +468,7 @@ export function adminRouter(gc: GcClient, cityPath: string): Router {
       void recordAudit({
         type: 'dashboard.fetch',
         endpoint: 'GET /api/admin/closed-beads',
-        parsed_args: { window_days: '7', bead_count: String(items.length) },
+        parsed_args: { window_hours: '24', bead_count: String(items.length) },
         duration_ms: result.durationMs,
       });
       res.json({ items, total: items.length });

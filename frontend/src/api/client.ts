@@ -158,7 +158,7 @@ export const api = {
   },
   // cd-nim6: Cockpit's recently-closed panel can't lean on /api/beads
   // (supervisor's /v0/beads omits closed_at on closed records). This
-  // endpoint shell-execs the bd CLI on a 7-day window with limit 50.
+  // endpoint shell-execs the bd CLI on a 24h window with limit 10.
   closedBeads(): Promise<{ items: GcBead[]; total: number }> {
     return request('GET', '/api/admin/closed-beads');
   },

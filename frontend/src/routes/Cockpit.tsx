@@ -74,7 +74,7 @@ export function CockpitPage() {
   // cd-nim6: separate slice for closed beads — /api/beads' closed_at
   // omission means the Recently-Closed panel can't filter the main
   // beads slice. Sourced from /api/admin/closed-beads which shell-execs
-  // the bd CLI for the 7-day window with closed_at populated.
+  // the bd CLI for the 24h window with closed_at populated.
   const [closedBeads, setClosedBeads] = useState<PanelState<GcBead[]>>(emptyPanel());
   const [throughput, setThroughput] = useState<PanelState<ThroughputTrend>>(emptyPanel());
   const [pipeline, setPipeline] = useState<PanelState<PipelineStageCounts>>(emptyPanel());

@@ -433,6 +433,11 @@ export async function execBdListClosed(
     // before any limit takes effect. The JS-side isEngBead filter in
     // routes/admin.ts:computeThroughput still applies the final pass —
     // these excludes are a bandwidth saver, not the source of truth.
+    //
+    // --sort=closed: essential for the closed-beads endpoint (most-recent
+    // first; cd-nim6). Throughput-trend buckets by date and is
+    // order-independent, so the flag is a no-op there. If a new caller
+    // of execBdListClosed depends on input order, audit this flag.
     return await runExec(
       'gc',
       [
