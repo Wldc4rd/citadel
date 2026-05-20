@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { GitCommit, GitView } from 'citadel-shared';
-import { execGitLog, ExecError } from '../exec.js';
+import { execGitLog, GIT_PRETTY_FORMAT, ExecError } from '../exec.js';
 import { recordAudit } from '../audit.js';
 
 // Hardcoded enum of `git log` invocations. Anything outside this set is
@@ -13,11 +13,12 @@ const VIEWS: ReadonlySet<GitView> = new Set([
   'this-week',
 ] as const);
 
-// Mirror of the format string in exec.ts::GIT_LOG_VIEWS so consumers
-// reading git.ts see what the parsed columns are. The runtime invocation
-// uses the inline copy in exec.ts — keep them in lockstep.
-// cd-q9cu: %cI (committer date) not %aI — see exec.ts comment.
-const PRETTY_FORMAT = '%H%x09%h%x09%an%x09%cI%x09%D%x09%s';
+// Single source of truth for the parsed columns lives in
+// exec.ts::GIT_PRETTY_FORMAT — re-exported here for any consumer that
+// reaches for the route file rather than the exec wrapper. cd-q9cu
+// review: an earlier copy of this string drifted between the two files;
+// fixing by reference eliminates that class of bug.
+const PRETTY_FORMAT = GIT_PRETTY_FORMAT;
 
 export function gitRouter(): Router {
   const router = Router();

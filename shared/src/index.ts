@@ -257,10 +257,11 @@ export interface GitCommit {
   short_sha: string;
   author: string;
   /**
-   * Committer date (git's %cI). Reflects when the commit was last
-   * recorded — captures rebases, cherry-picks, amend. Chosen over
-   * author date so the displayed timestamp matches git log's own
-   * sort order (cd-q9cu).
+   * Commit date (committer date, %cI in git log). Was author date pre-
+   * cd-q9cu; switched to commit date so the displayed timestamp matches
+   * git log's default sort order (recent-commits panel appeared
+   * unsorted when rebased commits' author dates predated their
+   * committer dates). Captures rebases, cherry-picks, amend.
    */
   date: IsoTimestamp;
   subject: string;
