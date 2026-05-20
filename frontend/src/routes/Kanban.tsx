@@ -200,11 +200,15 @@ function Column({
 }
 
 function Card({ card, now }: { card: KanbanCard; now: number }) {
+  // cd-8g9g: the bottom row (assignee + last_active) lives OUTSIDE the
+  // bead Link so the assignee can carry its own /agents/<assignee> Link
+  // without nesting <a>s (invalid HTML — browsers would close the outer
+  // <a> when they hit the inner one and the card click would break).
   return (
     <li className="rounded border border-ink-700 bg-ink-900/40 hover:bg-ink-900 transition-colors">
       <Link
         to={`/beads/${encodeURIComponent(card.id)}`}
-        className="block px-2 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 rounded"
+        className="block px-2 pt-1.5 pb-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 rounded"
         title={card.title}
       >
         <div className="flex items-baseline gap-1.5 mb-1">
@@ -224,17 +228,25 @@ function Card({ card, now }: { card: KanbanCard; now: number }) {
         <p className="text-[11px] text-ink-100 leading-snug line-clamp-3">
           {card.title || '(no title)'}
         </p>
-        <div className="flex items-baseline justify-between gap-2 mt-1 text-[10px]">
-          <span className="text-ink-300 truncate" title={card.assignee || 'unassigned'}>
-            {card.assignee || '—'}
-          </span>
-          {card.last_active && (
-            <span className="text-ink-400 tabular-nums whitespace-nowrap">
-              {formatRelativeNow(card.last_active, now)}
-            </span>
-          )}
-        </div>
       </Link>
+      <div className="px-2 pb-1.5 flex items-baseline justify-between gap-2 text-[10px]">
+        {card.assignee ? (
+          <Link
+            to={`/agents/${encodeURIComponent(card.assignee)}`}
+            className="text-ink-300 truncate hover:text-accent-500 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 rounded-sm"
+            title={`Open agent · ${card.assignee}`}
+          >
+            {card.assignee}
+          </Link>
+        ) : (
+          <span className="text-ink-300 truncate" title="unassigned">—</span>
+        )}
+        {card.last_active && (
+          <span className="text-ink-400 tabular-nums whitespace-nowrap">
+            {formatRelativeNow(card.last_active, now)}
+          </span>
+        )}
+      </div>
     </li>
   );
 }
