@@ -21,6 +21,10 @@ import { healthRouter } from './routes/health.js';
 import { doltRouter, startDoltNomsSampler } from './routes/dolt.js';
 import { adminRouter } from './routes/admin.js';
 import { setAuditLogPath } from './audit.js';
+import {
+  buildSupervisorCspSources,
+  rewriteSupervisorUrlForBrowser,
+} from './supervisor-url.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -44,7 +48,12 @@ function main(): void {
   // CSP connect-src extension: Phase C wires EventSource direct to gc
   // supervisor for /events/stream. Different port = different origin under
   // same-origin policy, so the supervisor URL must be explicitly enumerated.
-  app.use(securityHeaders([config.gcSupervisorUrl]));
+  // When the configured URL is loopback, we enumerate the same supervisor
+  // port on every allowed host so the browser can reach it via whichever
+  // hostname the dashboard is served on (cd-7d6n).
+  app.use(securityHeaders(
+    buildSupervisorCspSources(config.gcSupervisorUrl, config.extraAllowedHosts),
+  ));
   app.use(csrfIssueCookie);
 
   // ── Health check (no CSRF, no privileged access) ──────────────────────
@@ -84,10 +93,16 @@ function main(): void {
   // Frontend needs to know the gc supervisor URL to open EventSource
   // direct (architect addendum td-wisp-ijk7g). The CSP already allows
   // it; this endpoint is the one place that surfaces it to the browser
-  // so the URL isn't hardcoded in two places.
-  app.get('/api/config/gc-supervisor', (_req, res) => {
+  // so the URL isn't hardcoded in two places. When the configured URL
+  // is loopback, the URL handed to the browser is rewritten to use the
+  // same hostname the browser used to reach us (cd-7d6n).
+  app.get('/api/config/gc-supervisor', (req, res) => {
     res.json({
-      supervisor_url: config.gcSupervisorUrl,
+      supervisor_url: rewriteSupervisorUrlForBrowser(
+        config.gcSupervisorUrl,
+        req,
+        config.extraAllowedHosts,
+      ),
       city: config.cityName,
     });
   });
