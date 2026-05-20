@@ -235,6 +235,50 @@ export interface GcMailList {
   total?: number;
 }
 
+// cd-5cxk: 'All mail' view — server-side filter + cursor pagination
+// over the supervisor's mail corpus. Mirrors the cd-d68p shape for the
+// /beads endpoint so consumers don't have to learn a second pagination
+// vocabulary. Cursor is an opaque offset-encoded token (v:1 byte,
+// drift-on-concurrent-insert documented at the producer).
+
+export type MailBox = 'inbox' | 'sent' | 'all';
+
+export interface ListMailParams {
+  box?: MailBox;
+  /** Identity to filter against for inbox/sent boxes. Ignored when box='all'. */
+  alias?: string;
+  /** Substring match against `from` (case-insensitive). */
+  from?: string;
+  /** Substring match against `to` (case-insensitive). */
+  to?: string;
+  /** Substring match against `subject` (case-insensitive). */
+  subject?: string;
+  /** ISO timestamp lower bound on created_at (inclusive). */
+  after?: string;
+  /** ISO timestamp upper bound on created_at (inclusive). */
+  before?: string;
+  cursor?: string;
+  /** Page size; backend caps at MAX_PAGE_SIZE. */
+  limit?: number;
+}
+
+export interface ListMailResponse {
+  items: GcMailItem[];
+  /** Total count matching the active filters (post server-side filter). */
+  total: number;
+  next_cursor: string | null;
+  prev_cursor: string | null;
+  page_size: number;
+  box: MailBox;
+  /**
+   * True iff the supervisor returned MAX_UPSTREAM rows (the bd CLI's
+   * effective ceiling) and the filtered count may be missing rows
+   * outside that window. The 'All' view is the most likely place to
+   * hit this; alias-filtered boxes are tighter.
+   */
+  upstream_capped: boolean;
+}
+
 /**
  * Frontend "viewing as" context state. The operator's wire identity is
  * configurable via backend env GC_CITY_OWNER_ALIAS (surfaced as

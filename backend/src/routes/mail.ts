@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { GcMailItem } from 'citadel-shared';
+import type { GcMailItem, ListMailResponse, MailBox } from 'citadel-shared';
 import type { GcClient } from '../gc-client.js';
 import { recordAudit } from '../audit.js';
 
@@ -8,50 +8,175 @@ import { recordAudit } from '../audit.js';
 // Anything in this file may read `viewing-as`; nothing in this file sends.
 
 const ALIAS_RE = /^[a-z][a-z0-9_./-]{1,63}$/i;
-const BOX_VALUES = new Set(['inbox', 'sent', 'all']);
+const BOX_VALUES = new Set<MailBox>(['inbox', 'sent', 'all']);
 // td-7t24i6 scope expansion: gc supervisor's mail endpoint defaults to
 // limit=50 and caps at 1000 (verified — limit=2000 returns 1000). 1000 is
 // the practical max. For the current corpus (~1167 mails) this covers
 // ~86% which is enough for the common alias-filtered case; pagination
 // would need a separate v1 design if the corpus grows past 2-3× this.
 const FETCH_LIMIT = 1000;
+// cd-5cxk: page-size cap for the 'All mail' cursor pagination. Mirrors
+// cd-d68p shape on /beads. Default tuned for the typical narrow viewport;
+// MAX 200 keeps the response under a few hundred KB even with verbose
+// bodies.
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 200;
+// Free-text filter inputs validated against a permissive shape — accept
+// anything a user might reasonably type, reject control characters +
+// excessive length. The supervisor doesn't interpret these (we filter
+// server-side here), so injection isn't the concern; bounding length
+// is the concern.
+const TEXT_FILTER_RE = /^[^\x00-\x1f\x7f]{1,128}$/;
+// ISO-8601 instant lower/upper bounds for date range filters.
+const ISO_RE = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)?$/;
+
+function parsePositiveInt(raw: unknown, fallback: number, max: number): number {
+  if (typeof raw !== 'string') return fallback;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 1) return fallback;
+  return Math.min(n, max);
+}
+
+// cd-5cxk: cursor encodes offset only — same shape + v:1 version byte
+// as the cd-d68p beads cursor. Drift on concurrent insert is a known
+// limitation; clients that observe duplicate or skipped items across
+// pages should refetch from offset 0. Future migration to a stable
+// (sort_key, id) cursor bumps to v:2 without breaking deployed clients
+// that hold a v:1 value.
+const CURSOR_VERSION = 1;
+function encodeCursor(offset: number): string {
+  return Buffer.from(JSON.stringify({ v: CURSOR_VERSION, o: offset }), 'utf8').toString('base64url');
+}
+function decodeCursor(raw: unknown): number {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 256) return 0;
+  try {
+    const decoded = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as {
+      v?: unknown;
+      o?: unknown;
+    };
+    if (decoded.v !== undefined && decoded.v !== CURSOR_VERSION) return 0;
+    const offset = decoded?.o;
+    if (typeof offset === 'number' && Number.isFinite(offset) && offset >= 0 && offset < 1_000_000) {
+      return offset;
+    }
+  } catch {
+    /* falls through to 0 — invalid cursors are treated as start-of-list */
+  }
+  return 0;
+}
+
+interface ParsedListQuery {
+  box: MailBox;
+  alias: string;
+  from: string | undefined;
+  to: string | undefined;
+  subject: string | undefined;
+  after: string | undefined;
+  before: string | undefined;
+  offset: number;
+  limit: number;
+}
+
+function parseListQuery(
+  query: Record<string, unknown>,
+  defaultAlias: string,
+): ParsedListQuery | { error: string } {
+  const rawAlias = typeof query.alias === 'string' ? query.alias : defaultAlias;
+  const alias = ALIAS_RE.test(rawAlias) ? rawAlias : defaultAlias;
+  const rawBox = typeof query.box === 'string' ? query.box : 'inbox';
+  const box: MailBox = BOX_VALUES.has(rawBox as MailBox) ? (rawBox as MailBox) : 'inbox';
+
+  // cd-5cxk: free-text filters validated lightly — bounded length, no
+  // control chars. Substring matching happens in JS post-fetch.
+  const fromRaw = typeof query.from === 'string' && query.from.length > 0 ? query.from : undefined;
+  if (fromRaw && !TEXT_FILTER_RE.test(fromRaw)) return { error: 'invalid from filter' };
+  const toRaw = typeof query.to === 'string' && query.to.length > 0 ? query.to : undefined;
+  if (toRaw && !TEXT_FILTER_RE.test(toRaw)) return { error: 'invalid to filter' };
+  const subjectRaw = typeof query.subject === 'string' && query.subject.length > 0 ? query.subject : undefined;
+  if (subjectRaw && !TEXT_FILTER_RE.test(subjectRaw)) return { error: 'invalid subject filter' };
+
+  const afterRaw = typeof query.after === 'string' && query.after.length > 0 ? query.after : undefined;
+  if (afterRaw && !ISO_RE.test(afterRaw)) return { error: 'invalid after timestamp' };
+  const beforeRaw = typeof query.before === 'string' && query.before.length > 0 ? query.before : undefined;
+  if (beforeRaw && !ISO_RE.test(beforeRaw)) return { error: 'invalid before timestamp' };
+
+  const limit = parsePositiveInt(query.limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+  const offset = decodeCursor(query.cursor);
+
+  return {
+    box,
+    alias,
+    from: fromRaw,
+    to: toRaw,
+    subject: subjectRaw,
+    after: afterRaw,
+    before: beforeRaw,
+    offset,
+    limit,
+  };
+}
 
 export function mailRouter(gc: GcClient, ownerAlias: string): Router {
   const router = Router();
 
   router.get('/', async (req, res) => {
-    const rawAlias = typeof req.query.alias === 'string' ? req.query.alias : ownerAlias;
-    const rawBox = typeof req.query.box === 'string' ? req.query.box : 'inbox';
-    const alias = ALIAS_RE.test(rawAlias) ? rawAlias : ownerAlias;
-    const box: 'inbox' | 'sent' | 'all' = BOX_VALUES.has(rawBox)
-      ? (rawBox as 'inbox' | 'sent' | 'all')
-      : 'inbox';
+    const parsed = parseListQuery(req.query as Record<string, unknown>, ownerAlias);
+    if ('error' in parsed) {
+      res.status(400).json({ error: parsed.error, kind: 'validation' });
+      return;
+    }
+    const { box, alias, from, to, subject, after, before, offset, limit } = parsed;
+
     try {
       // td-h3n2ar fix: gc supervisor's `box` + `alias` query params are
       // silently ignored upstream (verified: box=sent&alias=mayor and
       // box=sent&alias=human both return the same first items with
       // to=mayor). So we can't lean on the supervisor to filter by sender.
       //
-      // Pull a wide window and filter server-side: inbox = to===alias,
-      // sent = from===alias. Filtering here keeps each box's results
-      // independent under as-identity switching, which is what Charlie
-      // actually wants from the UI.
+      // Pull a wide window and filter server-side. cd-5cxk extends this to
+      // accept from/to/subject/after/before filters + cursor pagination
+      // for the 'All' box. The same FETCH_LIMIT cap applies — upstream_
+      // capped surfaces when the supervisor returned the ceiling so the
+      // UI can warn that the filtered count may miss older rows.
       const { items: rawItems } = await gc.listMail(undefined, { limit: FETCH_LIMIT });
-      const filtered = filterByBox(rawItems, box, alias);
+      const upstream_capped = rawItems.length >= FETCH_LIMIT;
+
+      const filtered = applyFilters(rawItems, { box, alias, from, to, subject, after, before });
       // Newest first — td-liky3d default sort, applied at the source so
       // the API contract is stable independent of any table sort UI.
       filtered.sort((a, b) => b.created_at.localeCompare(a.created_at));
+      const total = filtered.length;
+      const items = filtered.slice(offset, offset + limit);
+      const next_cursor = offset + items.length < total ? encodeCursor(offset + limit) : null;
+      const prev_cursor = offset > 0 ? encodeCursor(Math.max(0, offset - limit)) : null;
+
       res.setHeader('Cache-Control', 'no-store');
-      res.json({
-        items: filtered,
-        total: filtered.length,
-        upstream_total: rawItems.length,
-      });
+      const payload: ListMailResponse = {
+        items,
+        total,
+        next_cursor,
+        prev_cursor,
+        page_size: limit,
+        box,
+        upstream_capped,
+      };
+      res.json(payload);
       void recordAudit({
         type: 'dashboard.fetch',
         endpoint: 'GET /api/mail',
         viewing_as: alias,
-        parsed_args: { box, alias, returned: String(filtered.length) },
+        parsed_args: {
+          box,
+          alias,
+          // Document active filters for audit-debugging without leaking
+          // the actual filter values (which could include third-party
+          // names a future privacy review might object to).
+          filters: [from && 'from', to && 'to', subject && 'subject', after && 'after', before && 'before']
+            .filter(Boolean)
+            .join(',') || 'none',
+          returned: String(items.length),
+          total: String(total),
+        },
         duration_ms: 0,
       });
     } catch (err) {
@@ -62,22 +187,35 @@ export function mailRouter(gc: GcClient, ownerAlias: string): Router {
   });
 
   // Thread view: gc supervisor doesn't expose a /threads/:id endpoint
-  // (verified: returns 404). We fetch the alias's inbox+sent and filter
-  // by thread_id server-side. Cheap at our scale + keeps clients dumb.
+  // (verified: returns 404). cd-5cxk extends the previous shape: when
+  // ?alias= is absent (typical for 'All mail' thread clicks), pull the
+  // wide window and filter by thread_id only — no alias filter.
   router.get('/threads/:id', async (req, res) => {
     const threadId = req.params.id;
     if (typeof threadId !== 'string' || threadId.length === 0 || threadId.length > 128) {
       res.status(400).json({ error: 'invalid thread id', kind: 'validation' });
       return;
     }
-    const rawAlias = typeof req.query.alias === 'string' ? req.query.alias : ownerAlias;
-    const alias = ALIAS_RE.test(rawAlias) ? rawAlias : ownerAlias;
+    // cd-5cxk: alias-less thread lookup is a deliberate path for the
+    // All-mail surface — when no ?alias= is provided, fall through to
+    // the wide-window fetch below and filter only by thread_id. The
+    // typed-alias path is preserved when an alias IS provided.
+    const rawAlias = typeof req.query.alias === 'string' ? req.query.alias : '';
+    const alias = ALIAS_RE.test(rawAlias) ? rawAlias : '';
     try {
-      const [inbox, sent] = await Promise.all([
-        gc.listMail(undefined, { box: 'inbox', alias }),
-        gc.listMail(undefined, { box: 'sent', alias }),
-      ]);
-      const all: GcMailItem[] = [...inbox.items, ...sent.items];
+      let all: GcMailItem[];
+      if (alias.length === 0) {
+        // cd-5cxk: alias-less thread lookup for the All-mail surface.
+        // Pull the wide window once and filter by thread_id.
+        const { items } = await gc.listMail(undefined, { limit: FETCH_LIMIT });
+        all = items;
+      } else {
+        const [inbox, sent] = await Promise.all([
+          gc.listMail(undefined, { box: 'inbox', alias }),
+          gc.listMail(undefined, { box: 'sent', alias }),
+        ]);
+        all = [...inbox.items, ...sent.items];
+      }
       const items = all
         .filter((m) => m.thread_id === threadId)
         .sort((a, b) => a.created_at.localeCompare(b.created_at));
@@ -93,8 +231,8 @@ export function mailRouter(gc: GcClient, ownerAlias: string): Router {
       void recordAudit({
         type: 'dashboard.fetch',
         endpoint: 'GET /api/mail/threads/:id',
-        viewing_as: alias,
-        parsed_args: { thread_id: threadId, alias },
+        viewing_as: alias || '(all)',
+        parsed_args: { thread_id: threadId, alias: alias || '(all)' },
         duration_ms: 0,
       });
     } catch (err) {
@@ -132,9 +270,38 @@ function expandOwnerAlias(alias: string): Set<string> {
   return out;
 }
 
+interface FilterParams {
+  box: MailBox;
+  alias: string;
+  from: string | undefined;
+  to: string | undefined;
+  subject: string | undefined;
+  after: string | undefined;
+  before: string | undefined;
+}
+
+function applyFilters(items: GcMailItem[], p: FilterParams): GcMailItem[] {
+  // cd-5cxk: combined filter pipeline. Box first (preserves cd-d9db
+  // OWNER_ALIASES bridge behaviour for inbox/sent), then text + date
+  // filters on top. All filters AND together — a single message must
+  // satisfy every active filter.
+  const boxed = filterByBox(items, p.box, p.alias);
+  const fromLower = p.from?.toLowerCase();
+  const toLower = p.to?.toLowerCase();
+  const subjectLower = p.subject?.toLowerCase();
+  return boxed.filter((m) => {
+    if (fromLower && (typeof m.from !== 'string' || !m.from.toLowerCase().includes(fromLower))) return false;
+    if (toLower && (typeof m.to !== 'string' || !m.to.toLowerCase().includes(toLower))) return false;
+    if (subjectLower && (typeof m.subject !== 'string' || !m.subject.toLowerCase().includes(subjectLower))) return false;
+    if (p.after && m.created_at < p.after) return false;
+    if (p.before && m.created_at > p.before) return false;
+    return true;
+  });
+}
+
 function filterByBox(
   items: GcMailItem[],
-  box: 'inbox' | 'sent' | 'all',
+  box: MailBox,
   alias: string,
 ): GcMailItem[] {
   // Aliases are case-insensitive at our scale — gc emits a mix of styles
