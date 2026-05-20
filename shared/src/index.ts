@@ -168,9 +168,12 @@ export interface ListBeadsParams {
    * Filter to beads with at least one label starting with this prefix.
    * cd-iiq7: cockpit's pipeline-stage chips link with this set (e.g.,
    * `needs-impl` matches `needs-impl:citadel` + `needs-impl:thriva` etc).
-   * Applied SERVER-SIDE in the engineering view only. Combining with
-   * showAll/type is a silent no-op (label_prefix is for the engineering
-   * surface where pipeline chips live).
+   * Applied SERVER-SIDE in both engineering and passthrough
+   * materialisations. Total reflects the post-filter set in both —
+   * supervisor doesn't know about the prefix filter so its total isn't
+   * authoritative here. (Same honest-pagination discipline as the
+   * engineering view's gc:* filter; cd-iiq7 review extended it after
+   * the original PR shipped engineering-only.)
    */
   label_prefix?: string;
   status?: 'open' | 'in_progress' | 'blocked' | 'closed';

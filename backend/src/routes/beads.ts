@@ -224,6 +224,24 @@ export function beadsRouter(gc: GcClient, cityPath: string, ownerAlias: string):
         });
         items = upstream.items;
         total = typeof upstream.total === 'number' ? upstream.total : items.length;
+        // cd-iiq7 review: apply label_prefix here too. Without this the
+        // filter is silently engineering-only, which violates filter-
+        // consistency-across-paths (same shape we hit twice in cd-d68p:
+        // gc:* filter, pagination total). senior_developer's framing:
+        // any new /api/beads query param should answer "applies in both
+        // materialisations?" — yes by default.
+        //
+        // Total recompute trades supervisor's exact total (counts all
+        // prefix-matching upstream rows the local filter didn't see) for
+        // honest total (matches what we actually returned). Same trade-
+        // off the engineering view already accepted for the gc:* filter.
+        if (label_prefix !== undefined) {
+          const pfx = label_prefix;
+          items = items.filter((b) =>
+            Array.isArray(b.labels) && b.labels.some((l) => l.startsWith(pfx)),
+          );
+          total = items.length;
+        }
       } else {
         const responses = await Promise.all(
           ENGINEERING_TYPES.map((t) =>
