@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { KanbanCard, KanbanColumn, KanbanResponse } from 'citadel-shared';
+import type {
+  BeadDetailResponse,
+  KanbanCard,
+  KanbanColumn,
+  KanbanResponse,
+} from 'citadel-shared';
 import { KANBAN_COLUMNS } from 'citadel-shared';
-import { api } from '../api/client';
+import { api, ApiClientError } from '../api/client';
 import { Button } from '../components/Button';
+import { Modal } from '../components/Modal';
 import { useGcEventRefresh } from '../hooks/useGcEvents';
 
 // Read-only Kanban (td-wyr6ly). Charlie directive 2026-05-19 17:02 UTC:
@@ -68,6 +74,15 @@ export function KanbanPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // cd-ykl9: lazy-loaded detail popover. Click the "ⓘ" on a card →
+  // fetch /api/beads/:id and show curated metadata + notes preview in
+  // a modal. The full drill-in stays the card's primary action; this
+  // modal is the at-a-glance answer for "what's the latest on this?"
+  // without leaving Kanban context.
+  const [detailFor, setDetailFor] = useState<string | null>(null);
+  const [detail, setDetail] = useState<BeadDetailResponse | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -102,6 +117,33 @@ export function KanbanPage() {
   }, []);
 
   const sseState = useGcEventRefresh(['bead.', 'session.'], () => void refresh());
+
+  const handleDetail = useCallback(async (beadId: string) => {
+    setDetailFor(beadId);
+    setDetail(null);
+    setDetailError(null);
+    setDetailLoading(true);
+    try {
+      const d = await api.beadDetail(beadId);
+      setDetail(d);
+    } catch (err) {
+      const msg =
+        err instanceof ApiClientError
+          ? `${err.status} ${err.message}`
+          : err instanceof Error
+            ? err.message
+            : 'detail fetch failed';
+      setDetailError(msg);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
+  const closeDetail = useCallback(() => {
+    setDetailFor(null);
+    setDetail(null);
+    setDetailError(null);
+  }, []);
 
   const staleness = fetchedAt === null
     ? 'down'
@@ -160,10 +202,37 @@ export function KanbanPage() {
               col={col}
               cards={data.columns[col]}
               now={now}
+              onDetail={handleDetail}
             />
           ))}
         </div>
       )}
+
+      <Modal
+        open={detailFor !== null}
+        onClose={closeDetail}
+        title={detail?.bead.title ?? (detailFor ? `Loading ${detailFor}…` : 'Bead detail')}
+        caption={detailFor ?? undefined}
+        widthClass="max-w-2xl"
+        footer={
+          detailFor && (
+            <Link
+              to={`/beads/${encodeURIComponent(detailFor)}`}
+              className="text-xs text-accent-500 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 rounded-sm"
+            >
+              Open full detail page →
+            </Link>
+          )
+        }
+      >
+        {detailLoading ? (
+          <p className="text-sm text-ink-300 italic">Loading bead detail…</p>
+        ) : detailError ? (
+          <p className="text-sm text-error-500">Error: {detailError}</p>
+        ) : detail ? (
+          <BeadQuickDetail detail={detail} now={now} />
+        ) : null}
+      </Modal>
     </section>
   );
 }
@@ -172,10 +241,12 @@ function Column({
   col,
   cards,
   now,
+  onDetail,
 }: {
   col: KanbanColumn;
   cards: KanbanCard[];
   now: number;
+  onDetail: (beadId: string) => void;
 }) {
   return (
     <div className={`shrink-0 w-64 rounded-md border bg-ink-800 ${COLUMN_TONE[col]}`}>
@@ -192,14 +263,24 @@ function Column({
         {cards.length === 0 ? (
           <li className="text-[11px] text-ink-400 italic text-center py-2">empty</li>
         ) : (
-          cards.map((c) => <Card key={c.id} card={c} now={now} />)
+          cards.map((c) => (
+            <Card key={c.id} card={c} now={now} onDetail={onDetail} />
+          ))
         )}
       </ul>
     </div>
   );
 }
 
-function Card({ card, now }: { card: KanbanCard; now: number }) {
+function Card({
+  card,
+  now,
+  onDetail,
+}: {
+  card: KanbanCard;
+  now: number;
+  onDetail: (beadId: string) => void;
+}) {
   // cd-8g9g: the bottom row (assignee + last_active) lives OUTSIDE the
   // bead Link so the assignee can carry its own /agents/<assignee> Link
   // without nesting <a>s (invalid HTML — browsers would close the outer
@@ -241,13 +322,131 @@ function Card({ card, now }: { card: KanbanCard; now: number }) {
         ) : (
           <span className="text-ink-300 truncate" title="unassigned">—</span>
         )}
-        {card.last_active && (
-          <span className="text-ink-400 tabular-nums whitespace-nowrap">
-            {formatRelativeNow(card.last_active, now)}
-          </span>
-        )}
+        <div className="flex items-baseline gap-1.5">
+          {card.last_active && (
+            <span className="text-ink-400 tabular-nums whitespace-nowrap">
+              {formatRelativeNow(card.last_active, now)}
+            </span>
+          )}
+          {/* cd-ykl9: lazy-load detail without leaving Kanban context. The
+              button is OUTSIDE the card's Link wrapper — no nested <a>s. */}
+          <button
+            type="button"
+            onClick={() => onDetail(card.id)}
+            className="text-ink-400 hover:text-accent-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 rounded-sm px-0.5"
+            title="Quick detail (notes, deps, age) without leaving Kanban"
+            aria-label={`Show quick detail for ${card.id}`}
+          >
+            ⓘ
+          </button>
+        </div>
       </div>
     </li>
+  );
+}
+
+// cd-ykl9: curated detail surface for the Kanban quick-popover modal.
+// Optimised for at-a-glance scan: timestamps, owner/assignee, deps
+// count, recent notes preview. The full /beads/:id page is still the
+// canonical detail; this is the "answer the obvious question without
+// losing my place in Kanban" surface.
+function BeadQuickDetail({ detail, now }: { detail: BeadDetailResponse; now: number }) {
+  const b = detail.bead;
+  const depCount = Array.isArray(b.dependencies) ? b.dependencies.length : 0;
+  return (
+    <div className="space-y-3 text-xs">
+      <dl className="grid grid-cols-[6rem,1fr] gap-x-3 gap-y-1">
+        <dt className="text-ink-300">Status</dt>
+        <dd className="text-ink-100">
+          {b.status}
+          {b.close_reason && (
+            <span className="ml-2 text-ink-300 italic">· {b.close_reason}</span>
+          )}
+        </dd>
+        <dt className="text-ink-300">Type</dt>
+        <dd className="text-ink-100">
+          {b.issue_type} <span className="text-ink-300">· P{b.priority}</span>
+        </dd>
+        {b.owner && (
+          <>
+            <dt className="text-ink-300">Owner</dt>
+            <dd className="text-ink-100">{b.owner}</dd>
+          </>
+        )}
+        {b.assignee && (
+          <>
+            <dt className="text-ink-300">Assignee</dt>
+            <dd className="text-ink-100">
+              <Link
+                to={`/agents/${encodeURIComponent(b.assignee)}`}
+                className="text-accent-500 hover:underline"
+              >
+                {b.assignee}
+              </Link>
+            </dd>
+          </>
+        )}
+        <dt className="text-ink-300">Created</dt>
+        <dd className="text-ink-200 tabular-nums">
+          {formatRelativeNow(b.created_at, now)}
+          {b.created_by && <span className="text-ink-300"> · by {b.created_by}</span>}
+        </dd>
+        {b.started_at && b.started_at !== b.created_at && (
+          <>
+            <dt className="text-ink-300">Started</dt>
+            <dd className="text-ink-200 tabular-nums">{formatRelativeNow(b.started_at, now)}</dd>
+          </>
+        )}
+        {b.updated_at && b.updated_at !== b.created_at && (
+          <>
+            <dt className="text-ink-300">Updated</dt>
+            <dd className="text-ink-200 tabular-nums">{formatRelativeNow(b.updated_at, now)}</dd>
+          </>
+        )}
+        {b.closed_at && (
+          <>
+            <dt className="text-ink-300">Closed</dt>
+            <dd className="text-ink-200 tabular-nums">{formatRelativeNow(b.closed_at, now)}</dd>
+          </>
+        )}
+        <dt className="text-ink-300">Dependencies</dt>
+        <dd className="text-ink-100">
+          {depCount === 0 ? <span className="text-ink-300">—</span> : `${depCount} edge${depCount === 1 ? '' : 's'}`}
+        </dd>
+        {Array.isArray(b.labels) && b.labels.length > 0 && (
+          <>
+            <dt className="text-ink-300">Labels</dt>
+            <dd className="flex flex-wrap gap-1">
+              {b.labels.map((l) => (
+                <span
+                  key={l}
+                  className="text-[10px] px-1.5 py-0.5 rounded bg-ink-700/60 border border-ink-600 text-ink-200"
+                >
+                  {l}
+                </span>
+              ))}
+            </dd>
+          </>
+        )}
+      </dl>
+
+      {detail.notes_html && detail.notes_html.length > 0 && (
+        <section className="space-y-1">
+          <h3 className="text-[10px] uppercase tracking-wider text-ink-300">Recent notes</h3>
+          {/* notes_html is rendered server-side by renderMarkdownSafe
+              (strict-allowlist sanitiser; see backend/src/markdown.ts).
+              The same dangerouslySetInnerHTML pattern that /beads/:id
+              uses — safe here for the same reason. Capped via CSS
+              max-h + overflow-y so a notes-heavy bead doesn't bloat
+              the modal. */}
+          <div
+            className="bead-md text-[11px] max-h-64 overflow-y-auto rounded-md border border-ink-700 bg-ink-900/50 px-3 py-2"
+            // eslint-disable-next-line react/no-danger
+            dangerouslySetInnerHTML={{ __html: detail.notes_html }}
+          />
+        </section>
+      )}
+    </div>
   );
 }
 
