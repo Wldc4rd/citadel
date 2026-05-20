@@ -14,11 +14,12 @@ function detailSlug(s: GcSession): string {
   return s.session_name ?? s.alias ?? s.id;
 }
 
-// cd-ycoh: visible filter UI + URL sync. The Agents page now exposes
+// cd-ycoh: visible filter UI + URL sync. The Agents page exposes
 // state / rig / template dropdowns with filter chips at the top, and
 // every filter change writes to the URL so the view is shareable +
-// survives reload. Reading the URL on mount also lets the cockpit's
-// Sessions tally chips (cd-iiq7) deep-link into a filtered view.
+// survives reload. cd-iiq7 layered ?attached=1 / ?hot_context=1 onto
+// the same URL scheme so the cockpit Sessions tally chips deep-link
+// into a filtered view through the same setFilter helper.
 //
 // SCOPE NOTE — server-side execution is out of this PR. The bead
 // description mentions it as forward-looking for "large agent counts",
@@ -29,9 +30,16 @@ function detailSlug(s: GcSession): string {
 export function AgentsPage() {
   usePageTitle('Agents');
   const [searchParams, setSearchParams] = useSearchParams();
+  // state/rig/template are free-form strings derived from the live
+  // session set (see uniqueStates/uniqueRigs/uniqueTemplates below);
+  // any value the dropdowns surface is by construction a valid filter.
+  // attached/hot_context are booleans encoded as '1' in the URL so the
+  // deep-link from the cockpit chips is human-readable.
   const stateFilter = searchParams.get('state');
   const rigFilter = searchParams.get('rig');
   const templateFilter = searchParams.get('template');
+  const attachedFilter = searchParams.get('attached') === '1';
+  const hotContextFilter = searchParams.get('hot_context') === '1';
 
   const [rows, setRows] = useState<GcSession[]>([]);
   const [loading, setLoading] = useState(false);
@@ -124,17 +132,25 @@ export function AgentsPage() {
     }, { replace: true });
   }, [setSearchParams]);
 
+  // cd-iiq7: attached and hot_context fold into the same filter chain
+  // alongside cd-ycoh's state/rig/template. hot_context derives from
+  // context_pct >= 95 — mirrors the cockpit BeadsTallyPanel definition
+  // so the deep-link from the chip lands on the same set of sessions
+  // it counted.
   const filteredRows = useMemo(() => {
-    if (!stateFilter && !rigFilter && !templateFilter) return rows;
+    if (!stateFilter && !rigFilter && !templateFilter && !attachedFilter && !hotContextFilter) return rows;
     return rows.filter((r) => {
       if (stateFilter && r.state !== stateFilter) return false;
       if (rigFilter && r.rig !== rigFilter) return false;
       if (templateFilter && r.template !== templateFilter) return false;
+      if (attachedFilter && !r.attached) return false;
+      if (hotContextFilter && !(typeof r.context_pct === 'number' && r.context_pct >= 95)) return false;
       return true;
     });
-  }, [rows, stateFilter, rigFilter, templateFilter]);
+  }, [rows, stateFilter, rigFilter, templateFilter, attachedFilter, hotContextFilter]);
 
-  const anyFilterActive = stateFilter !== null || rigFilter !== null || templateFilter !== null;
+  const anyFilterActive =
+    stateFilter !== null || rigFilter !== null || templateFilter !== null || attachedFilter || hotContextFilter;
 
   const columns = useMemo<ReadonlyArray<TableColumn<GcSession>>>(() => [
     {

@@ -93,6 +93,16 @@ interface ParsedQuery {
   sort: BeadSortKey;
   order: BeadSortOrder;
   label: string | undefined;
+  /**
+   * cd-iiq7: cockpit pipeline-stage chips (e.g., "needs-impl") link to
+   * /beads with this param so the page filters to any label starting
+   * with the prefix. The supervisor's /v0/beads doesn't accept a
+   * label-prefix flag, so the prefix filter runs AFTER the fan-out in
+   * the engineering branch (and AFTER the supervisor's single-query
+   * response in the passthrough branch). Validated against the same
+   * LABEL_RE the exact-match `label` param uses.
+   */
+  label_prefix: string | undefined;
   status: 'open' | 'in_progress' | 'blocked' | 'closed' | undefined;
   type: string | undefined;
   offset: number;
@@ -112,6 +122,11 @@ function parseListQuery(query: Record<string, unknown>): ParsedQuery | { error: 
   if (typeof query.label === 'string' && query.label.length > 0 && label === undefined) {
     return { error: 'invalid label' };
   }
+  const labelPrefixRaw = typeof query.label_prefix === 'string' ? query.label_prefix : undefined;
+  const label_prefix = labelPrefixRaw && LABEL_RE.test(labelPrefixRaw) ? labelPrefixRaw : undefined;
+  if (typeof labelPrefixRaw === 'string' && labelPrefixRaw.length > 0 && label_prefix === undefined) {
+    return { error: 'invalid label_prefix' };
+  }
   const statusRaw = typeof query.status === 'string' ? query.status : undefined;
   if (statusRaw && !VALID_STATUS.has(statusRaw)) return { error: 'invalid status' };
   const type = typeof query.type === 'string' && TYPE_RE.test(query.type) ? query.type : undefined;
@@ -127,6 +142,7 @@ function parseListQuery(query: Record<string, unknown>): ParsedQuery | { error: 
     sort,
     order,
     label,
+    label_prefix,
     status: (statusRaw as ParsedQuery['status']) ?? undefined,
     type,
     offset,
@@ -172,7 +188,7 @@ export function beadsRouter(gc: GcClient, cityPath: string, ownerAlias: string):
       res.status(400).json({ error: parsed.error, kind: 'validation' });
       return;
     }
-    const { sort, order, label, status, type, offset, limit, showAll } = parsed;
+    const { sort, order, label, label_prefix, status, type, offset, limit, showAll } = parsed;
 
     try {
       // Two materialisation paths:
@@ -227,9 +243,20 @@ export function beadsRouter(gc: GcClient, cityPath: string, ownerAlias: string):
           merged.push(...r.items);
           if (r.items.length === ENGINEERING_PER_TYPE_LIMIT) view_capped = true;
         }
-        const filtered = merged.filter((b) =>
+        let filtered = merged.filter((b) =>
           !(Array.isArray(b.labels) && b.labels.some((l) => l.startsWith('gc:'))),
         );
+        // cd-iiq7: optional label-prefix filter — used by the cockpit's
+        // pipeline-stage chips (e.g. "needs-impl" → filter to any bead
+        // whose label starts with "needs-impl"). Server-side here keeps
+        // pagination honest (total reflects the prefix-filtered set,
+        // same discipline as the gc:* filter above).
+        if (label_prefix !== undefined) {
+          const pfx = label_prefix;
+          filtered = filtered.filter((b) =>
+            Array.isArray(b.labels) && b.labels.some((l) => l.startsWith(pfx)),
+          );
+        }
         filtered.sort((a, b) => compareForSort(a, b, sort, order));
         // total comes from the FILTERED set — pagination would otherwise
         // "lie" by emitting a non-null next_cursor pointing into an empty

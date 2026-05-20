@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import type { BeadSortKey, BeadSortOrder, GcBead, ListBeadsResponse } from 'citadel-shared';
 import { api, ApiClientError } from '../api/client';
 import { Button } from '../components/Button';
@@ -28,12 +28,46 @@ const KEY_TO_SORT_COL: Record<BeadSortKey, string> = {
   created_at: 'updated', // share the "time" column header for either time key
 };
 
+// cd-iiq7: validate URL-driven status filter at the consumer boundary.
+// Mirrors backend/src/routes/beads.ts VALID_STATUS so a bogus deep-link
+// (e.g. ?status=garbage) silently falls through instead of forcing the
+// server to 400 on bootstrap.
+const URL_STATUS_VALUES = new Set<'open' | 'in_progress' | 'blocked' | 'closed'>([
+  'open',
+  'in_progress',
+  'blocked',
+  'closed',
+]);
+// LABEL_RE mirror for URL filter sanitisation. Mirrors backend regex.
+const URL_LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,63}$/;
+
 export function BeadsPage() {
   usePageTitle('Beads');
+  // cd-iiq7: deep-link via URL params — cockpit chips hand us
+  // ?status=… / ?label=… / ?label_prefix=… and we hydrate the filter
+  // state once on mount. Interactive filter changes (e.g. clicking a
+  // label chip) do NOT push back to the URL today — URL state sync is
+  // a follow-up (the cd-d68p reviewer flagged it).
+  const [searchParams] = useSearchParams();
+  const initialStatus = (() => {
+    const v = searchParams.get('status');
+    return v && URL_STATUS_VALUES.has(v as 'open') ? (v as 'open' | 'in_progress' | 'blocked' | 'closed') : null;
+  })();
+  const initialLabel = (() => {
+    const v = searchParams.get('label');
+    return v && URL_LABEL_RE.test(v) ? v : null;
+  })();
+  const initialLabelPrefix = (() => {
+    const v = searchParams.get('label_prefix');
+    return v && URL_LABEL_RE.test(v) ? v : null;
+  })();
+
   const [data, setData] = useState<ListBeadsResponse | null>(null);
   const [sort, setSort] = useState<BeadSortKey>('updated_at');
   const [order, setOrder] = useState<BeadSortOrder>('desc');
-  const [labelFilter, setLabelFilter] = useState<string | null>(null);
+  const [labelFilter, setLabelFilter] = useState<string | null>(initialLabel);
+  const [labelPrefixFilter, setLabelPrefixFilter] = useState<string | null>(initialLabelPrefix);
+  const [statusFilter, setStatusFilter] = useState<'open' | 'in_progress' | 'blocked' | 'closed' | null>(initialStatus);
   const [showAll, setShowAll] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -52,6 +86,8 @@ export function BeadsPage() {
         sort,
         order,
         label: labelFilter ?? undefined,
+        label_prefix: labelPrefixFilter ?? undefined,
+        status: statusFilter ?? undefined,
         showAll,
         cursor: cursor ?? undefined,
       });
@@ -61,7 +97,7 @@ export function BeadsPage() {
     } finally {
       setLoading(false);
     }
-  }, [sort, order, labelFilter, showAll, cursor]);
+  }, [sort, order, labelFilter, labelPrefixFilter, statusFilter, showAll, cursor]);
 
   useEffect(() => {
     void refresh();
@@ -312,6 +348,42 @@ export function BeadsPage() {
             type="button"
             onClick={() => {
               setLabelFilter(null);
+              setCursor(null);
+            }}
+            className="underline decoration-dotted hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 rounded-sm"
+          >
+            clear
+          </button>
+        </div>
+      )}
+
+      {labelPrefixFilter !== null && (
+        <div className="rounded-md border border-accent-700/40 bg-accent-700/10 px-3 py-1.5 text-xs text-accent-500 flex items-center justify-between gap-3">
+          <span>
+            Filtering by label-prefix <code className="font-sans text-ink-100">{labelPrefixFilter}*</code> · {total} total
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setLabelPrefixFilter(null);
+              setCursor(null);
+            }}
+            className="underline decoration-dotted hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 rounded-sm"
+          >
+            clear
+          </button>
+        </div>
+      )}
+
+      {statusFilter !== null && (
+        <div className="rounded-md border border-accent-700/40 bg-accent-700/10 px-3 py-1.5 text-xs text-accent-500 flex items-center justify-between gap-3">
+          <span>
+            Filtering by status <code className="font-sans text-ink-100">{statusFilter}</code> · {total} total
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setStatusFilter(null);
               setCursor(null);
             }}
             className="underline decoration-dotted hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 rounded-sm"
