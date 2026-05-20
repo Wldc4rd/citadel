@@ -57,11 +57,29 @@ export function agentsRouter(cityPath: string): Router {
         bytes: result.stdout.length,
       });
     } catch (err) {
+      // security_researcher (cd-i81q review): failed-validation attempts
+      // are the most interesting audit entries — they're the probing /
+      // scanning signal. Mirror the success-path recordAudit so the
+      // forensic record is symmetric across outcomes. Error kind +
+      // requested alias only; no error message body (could contain
+      // upstream stderr that's noisy or sensitive).
       if (err instanceof ExecError) {
         const status = err.kind === 'validation' ? 400 : err.kind === 'timeout' ? 504 : 500;
+        void recordAudit({
+          type: 'dashboard.fetch',
+          endpoint: 'GET /api/agents/:alias/prime',
+          parsed_args: { agent: alias, error_kind: err.kind },
+          duration_ms: 0,
+        });
         res.status(status).json({ error: err.message, kind: err.kind });
         return;
       }
+      void recordAudit({
+        type: 'dashboard.fetch',
+        endpoint: 'GET /api/agents/:alias/prime',
+        parsed_args: { agent: alias, error_kind: 'unknown' },
+        duration_ms: 0,
+      });
       res.status(500).json({ error: (err as Error).message, kind: 'internal' });
     }
   });
