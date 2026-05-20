@@ -71,6 +71,11 @@ export function CockpitPage() {
   const [cityConfig, setCityConfig] = useState<CityConfig | null>(null);
   const [sessions, setSessions] = useState<PanelState<GcSession[]>>(emptyPanel());
   const [beads, setBeads] = useState<PanelState<GcBead[]>>(emptyPanel());
+  // cd-nim6: separate slice for closed beads — /api/beads' closed_at
+  // omission means the Recently-Closed panel can't filter the main
+  // beads slice. Sourced from /api/admin/closed-beads which shell-execs
+  // the bd CLI for the 7-day window with closed_at populated.
+  const [closedBeads, setClosedBeads] = useState<PanelState<GcBead[]>>(emptyPanel());
   const [throughput, setThroughput] = useState<PanelState<ThroughputTrend>>(emptyPanel());
   const [pipeline, setPipeline] = useState<PanelState<PipelineStageCounts>>(emptyPanel());
   const [commits, setCommits] = useState<PanelState<GitCommit[]>>(emptyPanel());
@@ -132,6 +137,18 @@ export function CockpitPage() {
     }
   }, []);
 
+  const refreshClosedBeads = useCallback(async () => {
+    try {
+      const { items } = await api.closedBeads();
+      setClosedBeads({ data: items, fetchedAt: Date.now(), error: null });
+    } catch (err) {
+      setClosedBeads((prev) => ({
+        ...prev,
+        error: err instanceof Error ? err.message : 'closed beads failed',
+      }));
+    }
+  }, []);
+
   const refreshThroughput = useCallback(async () => {
     try {
       const t = await api.throughputTrend();
@@ -171,10 +188,11 @@ export function CockpitPage() {
   const refreshAll = useCallback(() => {
     void refreshSessions();
     void refreshBeads();
+    void refreshClosedBeads();
     void refreshThroughput();
     void refreshPipeline();
     void refreshCommits();
-  }, [refreshSessions, refreshBeads, refreshThroughput, refreshPipeline, refreshCommits]);
+  }, [refreshSessions, refreshBeads, refreshClosedBeads, refreshThroughput, refreshPipeline, refreshCommits]);
 
   useEffect(() => {
     refreshAll();
@@ -381,11 +399,11 @@ export function CockpitPage() {
           error={commits.error}
         />
         <ClosedBeadsPanel
-          beads={beads.data}
-          health={panelHealth(beads.fetchedAt, now)}
-          fetchedAt={beads.fetchedAt}
+          beads={closedBeads.data}
+          health={panelHealth(closedBeads.fetchedAt, now)}
+          fetchedAt={closedBeads.fetchedAt}
           now={now}
-          error={beads.error}
+          error={closedBeads.error}
         />
       </div>
 

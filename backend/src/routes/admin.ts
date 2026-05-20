@@ -425,6 +425,69 @@ export function adminRouter(gc: GcClient, cityPath: string): Router {
     }
   });
 
+  // cd-nim6: Cockpit's "Recently closed beads" panel was empty because
+  // it was filtering /api/beads results for status=closed && closed_at
+  // present — but supervisor's /v0/beads omits closed_at on closed
+  // beads. The bd CLI returns the full record including closed_at, so
+  // we shell-exec here (same pattern as throughput-trend + kanban).
+  //
+  // Output-size discipline: bd returns the FULL bead record (with
+  // notes/design/description). Some closed beads carry multi-KB review
+  // notes — measured at ~9KB per row. exec.ts caps total stdout at
+  // 100KB so the combo here — 24h window + limit=10 + --sort=closed
+  // (added to execBdListClosed) — stays around 80KB worst-case. 24h
+  // matches the Kanban's closed_24h precedent. On a quiet day the panel
+  // shows "No closed beads in window."; a wider rolling window is
+  // possible if the per-row size shrinks (e.g., a future --fields=
+  // flag) — see cd-nim6 notes for the trade-off.
+  router.get('/closed-beads', async (_req, res) => {
+    try {
+      const windowStartMs = Date.now() - 24 * 60 * 60 * 1_000;
+      const closedAfter = new Date(windowStartMs).toISOString();
+      const result = await execBdListClosed(cityPath, closedAfter, 10);
+      if (result.exitCode !== 0) {
+        res.status(502).json({
+          error: `gc bd list failed with exit ${result.exitCode}`,
+          kind: 'upstream',
+          details: { stderr: result.stderr.slice(0, 1024) },
+        });
+        return;
+      }
+      let items: GcBead[];
+      try {
+        const parsed = JSON.parse(result.stdout);
+        items = Array.isArray(parsed) ? (parsed as GcBead[]) : [];
+      } catch (parseErr) {
+        res.status(502).json({
+          error: 'failed to parse bd list output',
+          kind: 'upstream',
+          details: { message: (parseErr as Error).message },
+        });
+        return;
+      }
+      void recordAudit({
+        type: 'dashboard.fetch',
+        endpoint: 'GET /api/admin/closed-beads',
+        parsed_args: { window_days: '7', bead_count: String(items.length) },
+        duration_ms: result.durationMs,
+      });
+      res.json({ items, total: items.length });
+    } catch (err) {
+      if (err instanceof ExecError) {
+        res.status(err.kind === 'timeout' ? 504 : 500).json({
+          error: err.message,
+          kind: err.kind,
+        });
+        return;
+      }
+      res.status(502).json({
+        error: 'failed to list closed beads',
+        kind: 'upstream',
+        details: { message: (err as Error).message },
+      });
+    }
+  });
+
   router.get('/pipeline-stage-counts', async (_req, res) => {
     try {
       const { items } = await gc.listBeads(undefined, { limit: 1000 });
