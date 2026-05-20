@@ -399,7 +399,7 @@ function ComposeModal({
             autoFocus
             value={to}
             onChange={(e) => setTo(e.target.value)}
-            placeholder="mayor, mechanic, thriva/devpipeline.architect, …"
+            placeholder="mayor, mechanic, agent-name, <rig>/<agent>"
             className="mt-1 w-full bg-ink-900 border border-ink-600 rounded-md px-2 py-1.5 text-sm font-sans text-ink-100 focus:border-accent-700 focus:outline-none focus:ring-2 focus:ring-accent-700/30"
           />
         </label>
