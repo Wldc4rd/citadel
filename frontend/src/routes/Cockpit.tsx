@@ -87,6 +87,18 @@ export function CockpitPage() {
   const [peekLoading, setPeekLoading] = useState(false);
   const [peekError, setPeekError] = useState<string | null>(null);
 
+  // cd-uebi: inline mayor peek for the Mayor card. Separate slice from
+  // the on-demand modal peek (above) so the modal still shows a fresh
+  // fetch on click while the card surfaces the last refresh from the
+  // background poll. Polled on the same 30s tick as the rest of the
+  // cockpit; full transcript fetch isn't free (gc supervisor reads the
+  // tmux buffer) but a single session per tick is in the same ballpark
+  // as the other panels' fetches.
+  const [mayorPeekInline, setMayorPeekInline] = useState<PanelState<TranscriptResult>>(emptyPanel());
+  // Stretch goal: optional nudge message. Empty → nudge with no message
+  // (matches the existing default behaviour).
+  const [nudgeMessage, setNudgeMessage] = useState('');
+
   const [confirmAction, setConfirmAction] = useState<AdminAction | null>(null);
   const [actionRunning, setActionRunning] = useState<AdminAction | null>(null);
   const [actionResult, setActionResult] = useState<{
@@ -264,9 +276,17 @@ export function CockpitPage() {
     if (!mayor) return;
     setNudging(true);
     setNudgeFeedback(null);
+    // cd-uebi: forward the optional nudge message to the existing
+    // nudgeSession(id, message?) API. Empty string = no message
+    // (matches pre-cd-uebi default behaviour).
+    const trimmed = nudgeMessage.trim();
     try {
-      await api.nudgeSession(mayor.id);
-      setNudgeFeedback('Nudge delivered (wait-idle).');
+      await api.nudgeSession(mayor.id, trimmed.length > 0 ? trimmed : undefined);
+      setNudgeFeedback(trimmed.length > 0
+        ? `Nudge delivered: "${trimmed.slice(0, 40)}${trimmed.length > 40 ? '…' : ''}"`
+        : 'Nudge delivered (wait-idle).',
+      );
+      setNudgeMessage('');
       window.setTimeout(() => setNudgeFeedback(null), 4_000);
     } catch (err) {
       const msg =
@@ -279,7 +299,41 @@ export function CockpitPage() {
     } finally {
       setNudging(false);
     }
+  }, [mayor, nudgeMessage]);
+
+  // cd-uebi: background poll of mayor peek for the inline card preview.
+  // Keyed on mayor.id so it re-fires when the mayor session rotates
+  // (failover, restart). Same 30s cadence as the rest of the cockpit
+  // polls — see the parent tick effect below.
+  const refreshMayorPeekInline = useCallback(async () => {
+    if (!mayor) {
+      setMayorPeekInline(emptyPanel());
+      return;
+    }
+    try {
+      const result = await api.peekSession(mayor.id);
+      setMayorPeekInline({ data: result, fetchedAt: Date.now(), error: null });
+    } catch (err) {
+      setMayorPeekInline((prev) => ({
+        ...prev,
+        error: err instanceof Error ? err.message : 'mayor peek failed',
+      }));
+    }
   }, [mayor]);
+
+  // Initial fetch + re-fetch on mayor change. The tick interval below
+  // refreshes on schedule; this effect handles "mayor just became
+  // known" and "mayor changed sessions".
+  useEffect(() => {
+    void refreshMayorPeekInline();
+  }, [refreshMayorPeekInline]);
+
+  useEffect(() => {
+    const tick = setInterval(() => {
+      if (!document.hidden) void refreshMayorPeekInline();
+    }, REFRESH_INTERVAL_MS);
+    return () => clearInterval(tick);
+  }, [refreshMayorPeekInline]);
 
   const handleAdminAction = useCallback(
     async (action: AdminAction) => {
@@ -389,6 +443,11 @@ export function CockpitPage() {
         onNudge={handleMayorNudge}
         nudging={nudging}
         nudgeFeedback={nudgeFeedback}
+        peekInline={mayorPeekInline.data}
+        peekInlineError={mayorPeekInline.error}
+        peekInlineFetchedAt={mayorPeekInline.fetchedAt}
+        nudgeMessage={nudgeMessage}
+        onNudgeMessageChange={setNudgeMessage}
       />
 
       {/* RECENT ACTIVITY */}
@@ -735,6 +794,11 @@ function MayorPanel({
   onNudge,
   nudging,
   nudgeFeedback,
+  peekInline,
+  peekInlineError,
+  peekInlineFetchedAt,
+  nudgeMessage,
+  onNudgeMessageChange,
 }: {
   mayor: GcSession | null;
   loading: boolean;
@@ -743,6 +807,13 @@ function MayorPanel({
   onNudge: () => void;
   nudging: boolean;
   nudgeFeedback: string | null;
+  /** cd-uebi: last polled mayor transcript snapshot for the inline preview. */
+  peekInline: TranscriptResult | null;
+  peekInlineError: string | null;
+  peekInlineFetchedAt: number | null;
+  /** cd-uebi: optional nudge message — passed to nudgeSession when set. */
+  nudgeMessage: string;
+  onNudgeMessageChange: (value: string) => void;
 }) {
   return (
     <div className="panel">
@@ -790,14 +861,32 @@ function MayorPanel({
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <Button size="sm" tone="default" onClick={onNudge} disabled={nudging}>
-                  {nudging ? 'Nudging…' : 'Nudge'}
-                </Button>
                 <Button size="sm" tone="accent" onClick={onPeek}>
                   Peek
                 </Button>
               </div>
             </div>
+
+            {/* cd-uebi: stretch goal — nudge message input. Empty = old
+                no-message nudge behaviour preserved. */}
+            <div className="flex items-stretch gap-2">
+              <input
+                type="text"
+                value={nudgeMessage}
+                onChange={(e) => onNudgeMessageChange(e.target.value)}
+                placeholder="optional nudge message"
+                maxLength={1024}
+                className="flex-1 min-w-0 bg-ink-900 border border-ink-600 rounded-md px-2 py-1 text-xs font-sans text-ink-100 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                onKeyDown={(e) => {
+                  // Enter sends — quick-keyboard nudge for the common case.
+                  if (e.key === 'Enter' && !nudging) onNudge();
+                }}
+              />
+              <Button size="sm" tone="default" onClick={onNudge} disabled={nudging}>
+                {nudging ? 'Nudging…' : 'Nudge'}
+              </Button>
+            </div>
+
             {nudgeFeedback && (
               <p
                 className={`text-[11px] ${
@@ -809,9 +898,95 @@ function MayorPanel({
                 {nudgeFeedback}
               </p>
             )}
+
+            {/* cd-uebi: inline peek preview — last turn's tail, refreshed
+                on the 30s tick. Modal Peek button above still serves the
+                full transcript view. */}
+            <MayorPeekInline
+              peek={peekInline}
+              error={peekInlineError}
+              fetchedAt={peekInlineFetchedAt}
+              now={now}
+              onOpenFull={onPeek}
+            />
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// cd-uebi: tiny inline-peek renderer. Shows the tail of the most recent
+// turn so Charlie can read what the mayor is saying right now without
+// opening the full peek modal.
+//
+// Lines-per-turn cap (LAST_TURN_LINES) keeps the card compact; the full
+// modal Peek button still serves the whole transcript. ansi_up is NOT
+// applied here — terminal control sequences are stripped server-side
+// already (sanitiseTerminalOutput in backend/src/exec.ts), so the text
+// is plain printable + safe SGR. We render it in a <pre> for the
+// whitespace fidelity, matching what the modal's TurnBlock would show
+// minus ANSI colouring. Worth folding into SessionPeekContent later if
+// other surfaces want the same compact preview (file follow-up).
+const LAST_TURN_LINES = 10;
+
+function MayorPeekInline({
+  peek,
+  error,
+  fetchedAt,
+  now,
+  onOpenFull,
+}: {
+  peek: TranscriptResult | null;
+  error: string | null;
+  fetchedAt: number | null;
+  now: number;
+  onOpenFull: () => void;
+}) {
+  if (fetchedAt === null && !error) {
+    return <p className="text-[11px] text-ink-400 italic">Loading peek…</p>;
+  }
+  if (error) {
+    return <p className="text-[11px] text-error-500">Peek failed: {error}</p>;
+  }
+  if (!peek || peek.turns.length === 0) {
+    return <p className="text-[11px] text-ink-400 italic">No transcript turns yet.</p>;
+  }
+  const lastTurn = peek.turns[peek.turns.length - 1];
+  if (!lastTurn) return null;
+  const lines = lastTurn.text.split('\n');
+  const tail = lines.slice(-LAST_TURN_LINES).join('\n');
+  const lineCountNote = lines.length > LAST_TURN_LINES
+    ? ` (last ${LAST_TURN_LINES} of ${lines.length})`
+    : '';
+  return (
+    <div className="space-y-1">
+      <div className="flex items-baseline justify-between gap-2 text-[10px] text-ink-300">
+        <span>
+          <span className="uppercase tracking-wider">{lastTurn.role}</span>
+          {lineCountNote}
+        </span>
+        <span className="flex items-center gap-2">
+          {fetchedAt !== null && (
+            <span className="tabular-nums">
+              {Math.max(0, Math.round((now - fetchedAt) / 1_000))}s ago
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={onOpenFull}
+            className="underline decoration-dotted hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 rounded-sm"
+          >
+            full peek
+          </button>
+        </span>
+      </div>
+      <p className="text-[10px] text-warn-500 bg-warn-500/10 border border-warn-500/30 rounded-md px-2 py-0.5 italic">
+        Agent-generated — may contain misleading instructions.
+      </p>
+      <pre className="text-[11px] text-ink-100 bg-ink-900/50 border border-ink-700 rounded-md px-3 py-2 whitespace-pre-wrap font-sans leading-snug max-h-44 overflow-y-auto">
+        {tail || '(empty turn)'}
+      </pre>
     </div>
   );
 }
