@@ -94,6 +94,7 @@ export const api = {
     if (params?.sort) qs.set('sort', params.sort);
     if (params?.order) qs.set('order', params.order);
     if (params?.label) qs.set('label', params.label);
+    if (params?.label_prefix) qs.set('label_prefix', params.label_prefix);
     if (params?.status) qs.set('status', params.status);
     if (params?.type) qs.set('type', params.type);
     if (params?.cursor) qs.set('cursor', params.cursor);

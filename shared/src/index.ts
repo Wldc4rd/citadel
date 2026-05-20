@@ -164,6 +164,15 @@ export interface ListBeadsParams {
   sort?: BeadSortKey;
   order?: BeadSortOrder;
   label?: string;
+  /**
+   * Filter to beads with at least one label starting with this prefix.
+   * cd-iiq7: cockpit's pipeline-stage chips link with this set (e.g.,
+   * `needs-impl` matches `needs-impl:citadel` + `needs-impl:thriva` etc).
+   * Applied SERVER-SIDE in the engineering view only. Combining with
+   * showAll/type is a silent no-op (label_prefix is for the engineering
+   * surface where pipeline chips live).
+   */
+  label_prefix?: string;
   status?: 'open' | 'in_progress' | 'blocked' | 'closed';
   type?: string;
   cursor?: string;

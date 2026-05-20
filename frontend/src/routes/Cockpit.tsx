@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type {
   AdminAction,
   AdminActionResult,
@@ -548,14 +549,15 @@ function SessionsPanel({
   return (
     <PanelChrome title="Sessions" health={health} fetchedAt={fetchedAt} now={now} error={error}>
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
-        <BigNumber label="active" value={tallies.active} />
-        <BigNumber label="asleep" value={tallies.asleep} />
+        <BigNumber label="active" value={tallies.active} to="/agents?state=active" />
+        <BigNumber label="asleep" value={tallies.asleep} to="/agents?state=asleep" />
         <BigNumber
           label="hot ctx"
           value={tallies.hot_context}
           warn={tallies.hot_context > 0}
+          to="/agents?hot_context=1"
         />
-        <BigNumber label="attached" value={tallies.attached} />
+        <BigNumber label="attached" value={tallies.attached} to="/agents?attached=1" />
       </dl>
     </PanelChrome>
   );
@@ -588,13 +590,14 @@ function BeadsTallyPanel({
   return (
     <PanelChrome title="Beads" health={health} fetchedAt={fetchedAt} now={now} error={error}>
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
-        <BigNumber label="open" value={tally.open} />
-        <BigNumber label="in prog" value={tally.in_progress} />
-        <BigNumber label="needs rvw" value={tally.needs_review} />
+        <BigNumber label="open" value={tally.open} to="/beads?status=open" />
+        <BigNumber label="in prog" value={tally.in_progress} to="/beads?status=in_progress" />
+        <BigNumber label="needs rvw" value={tally.needs_review} to="/beads?label=needs-review" />
         <BigNumber
           label="blocked"
           value={tally.blocked}
           warn={tally.blocked > 0}
+          to="/beads?status=blocked"
         />
       </dl>
     </PanelChrome>
@@ -685,15 +688,22 @@ function PipelineStagesPanel({
   now: number;
   error: string | null;
 }) {
-  const stages: Array<[string, number, boolean]> = counts
+  // cd-iiq7: each stage links to /beads pre-filtered. Three patterns:
+  //   - exact label match (review, changes): ?label=<label>
+  //   - label prefix family (arch, impl): ?label_prefix=<pfx> matches
+  //     all needs-impl:X / needs-arch* variants
+  //   - status-only (in prog, blocked, other open): ?status=<status>
+  // 'arch' classifier accepts both needs-arch + needs-architect so the
+  // prefix 'needs-arch' covers both (needs-architect starts with it).
+  const stages: Array<[string, number, boolean, string]> = counts
     ? [
-        ['arch', counts.stages.needs_arch, false],
-        ['impl', counts.stages.needs_impl, false],
-        ['review', counts.stages.needs_review, false],
-        ['changes', counts.stages.needs_changes, true],
-        ['in prog', counts.stages.in_progress, false],
-        ['blocked', counts.stages.blocked, true],
-        ['other', counts.stages.other_open, false],
+        ['arch', counts.stages.needs_arch, false, '/beads?label_prefix=needs-arch'],
+        ['impl', counts.stages.needs_impl, false, '/beads?label_prefix=needs-impl'],
+        ['review', counts.stages.needs_review, false, '/beads?label=needs-review'],
+        ['changes', counts.stages.needs_changes, true, '/beads?label=needs-changes'],
+        ['in prog', counts.stages.in_progress, false, '/beads?status=in_progress'],
+        ['blocked', counts.stages.blocked, true, '/beads?status=blocked'],
+        ['other', counts.stages.other_open, false, '/beads?status=open'],
       ]
     : [];
   const max = Math.max(1, ...stages.map(([, v]) => v));
@@ -709,16 +719,22 @@ function PipelineStagesPanel({
         <p className="text-[11px] text-ink-300 italic">—</p>
       ) : (
         <ul className="space-y-1">
-          {stages.map(([label, value, warn]) => (
-            <li key={label} className="flex items-center gap-2 text-xs tabular-nums">
-              <span className="w-16 text-ink-300">{label}</span>
-              <span
-                className={`block h-2 rounded-sm ${warn && value > 0 ? 'bg-warn-500/70' : 'bg-accent-500/70'}`}
-                style={{ width: `${Math.max(2, (value / max) * 100)}%` }}
-              />
-              <span className={`text-ink-100 ml-auto ${warn && value > 0 ? 'text-warn-500' : ''}`}>
-                {value}
-              </span>
+          {stages.map(([label, value, warn, to]) => (
+            <li key={label}>
+              <Link
+                to={to}
+                className="flex items-center gap-2 text-xs tabular-nums rounded-sm -mx-1 px-1 hover:bg-ink-700/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 group"
+                title={`Open filtered beads: ${label}`}
+              >
+                <span className="w-16 text-ink-300 group-hover:text-ink-200 group-hover:underline">{label}</span>
+                <span
+                  className={`block h-2 rounded-sm ${warn && value > 0 ? 'bg-warn-500/70' : 'bg-accent-500/70'}`}
+                  style={{ width: `${Math.max(2, (value / max) * 100)}%` }}
+                />
+                <span className={`text-ink-100 ml-auto ${warn && value > 0 ? 'text-warn-500' : ''}`}>
+                  {value}
+                </span>
+              </Link>
             </li>
           ))}
         </ul>
@@ -1050,19 +1066,42 @@ function BigNumber({
   label,
   value,
   warn = false,
+  to,
 }: {
   label: string;
   value: number;
   warn?: boolean;
+  /**
+   * cd-iiq7: when present, the chip renders as a Link to a pre-filtered
+   * list view (e.g. /agents?state=active, /beads?status=open). Hover
+   * affordance signals clickability; non-clickable chips render the
+   * same atoms in a div.
+   */
+  to?: string;
 }) {
-  return (
-    <div>
+  const body = (
+    <>
       <dt className="text-[10px] uppercase tracking-wider text-ink-300">{label}</dt>
       <dd className={`text-xl font-semibold tabular-nums ${warn ? 'text-warn-500' : 'text-ink-100'}`}>
         {value}
       </dd>
-    </div>
+    </>
   );
+  if (to !== undefined) {
+    return (
+      <Link
+        to={to}
+        className="block group rounded-md -mx-1 px-1 hover:bg-ink-700/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500"
+        title={`Open filtered list: ${label}`}
+      >
+        <dt className="text-[10px] uppercase tracking-wider text-ink-300 group-hover:text-ink-200">{label}</dt>
+        <dd className={`text-xl font-semibold tabular-nums ${warn ? 'text-warn-500' : 'text-ink-100'} group-hover:underline`}>
+          {value}
+        </dd>
+      </Link>
+    );
+  }
+  return <div>{body}</div>;
 }
 
 function StatePill({ state, attached }: { state: string; attached: boolean }) {
