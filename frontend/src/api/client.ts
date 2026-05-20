@@ -18,6 +18,8 @@ import type {
   ThroughputTrend,
   ListBeadsParams,
   ListBeadsResponse,
+  ListMailParams,
+  ListMailResponse,
   ApiError,
 } from 'citadel-shared';
 
@@ -117,13 +119,31 @@ export const api = {
   beadDetail(id: string): Promise<BeadDetailResponse> {
     return request('GET', `/api/beads/${encodeURIComponent(id)}`);
   },
-  listMail(box: 'inbox' | 'sent' | 'all', alias: string): Promise<{ items: GcMailItem[]; total?: number }> {
-    const qs = new URLSearchParams({ box, alias }).toString();
-    return request('GET', `/api/mail?${qs}`);
+  // cd-5cxk: extended signature — All-mail view + filters + cursor
+  // pagination. The old call shape (box + alias only) still works
+  // because every new field is optional.
+  listMail(params: ListMailParams): Promise<ListMailResponse> {
+    const qs = new URLSearchParams();
+    if (params.box) qs.set('box', params.box);
+    if (params.alias) qs.set('alias', params.alias);
+    if (params.from) qs.set('from', params.from);
+    if (params.to) qs.set('to', params.to);
+    if (params.subject) qs.set('subject', params.subject);
+    if (params.after) qs.set('after', params.after);
+    if (params.before) qs.set('before', params.before);
+    if (params.cursor) qs.set('cursor', params.cursor);
+    if (params.limit) qs.set('limit', String(params.limit));
+    const s = qs.toString();
+    return request('GET', `/api/mail${s.length > 0 ? `?${s}` : ''}`);
   },
-  getThread(threadId: string, alias: string): Promise<{ items: GcMailItem[] }> {
-    const qs = new URLSearchParams({ alias }).toString();
-    return request('GET', `/api/mail/threads/${encodeURIComponent(threadId)}?${qs}`);
+  getThread(threadId: string, alias?: string): Promise<{ items: GcMailItem[] }> {
+    // cd-5cxk: alias is now optional; when absent the backend skips the
+    // owner-alias bridge and filters by thread_id only (used by the
+    // All-mail thread modal).
+    const qs = new URLSearchParams();
+    if (alias) qs.set('alias', alias);
+    const s = qs.toString();
+    return request('GET', `/api/mail/threads/${encodeURIComponent(threadId)}${s.length > 0 ? `?${s}` : ''}`);
   },
   sendMail(payload: MailComposeRequest): Promise<MailSendResult> {
     // The client-side shape mirrors the server's: { to, subject, body }.

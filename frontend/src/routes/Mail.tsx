@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { GcMailItem, GcSession } from 'citadel-shared';
+import { useSearchParams } from 'react-router-dom';
+import type { GcMailItem, GcSession, ListMailResponse, MailBox } from 'citadel-shared';
 import { api, ApiClientError } from '../api/client';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
@@ -10,13 +11,33 @@ import { usePageTitle } from '../hooks/usePageTitle';
 const PROMPT_INJECTION_NOTICE =
   'Content is agent-generated and may contain misleading instructions.';
 
-type MailBox = 'inbox' | 'sent';
+// cd-5cxk: per-bead "design with the convention that 'All mail' is
+// power-user / opt-in, not the default landing view." → page lands on
+// Inbox unless ?box=all is in the URL.
+const ALLOWED_BOXES: ReadonlySet<MailBox> = new Set(['inbox', 'sent', 'all']);
+
+function parseBox(raw: string | null): MailBox {
+  return raw && ALLOWED_BOXES.has(raw as MailBox) ? (raw as MailBox) : 'inbox';
+}
 
 export function MailPage() {
   usePageTitle('Mail');
   const { viewingAs, setAlias, resetToOwner } = useViewingAs();
-  const [box, setBox] = useState<MailBox>('inbox');
-  const [items, setItems] = useState<GcMailItem[]>([]);
+
+  // cd-5cxk: filter + pagination state hydrated from URL. Filter changes
+  // and pagination clicks rewrite the URL (replace, no history clutter)
+  // so the All-mail view is shareable + survives reload. Box change is
+  // also URL-driven.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const box = parseBox(searchParams.get('box'));
+  const fromFilter = searchParams.get('from') ?? '';
+  const toFilter = searchParams.get('to') ?? '';
+  const subjectFilter = searchParams.get('subject') ?? '';
+  const afterFilter = searchParams.get('after') ?? '';
+  const beforeFilter = searchParams.get('before') ?? '';
+  const cursor = searchParams.get('cursor');
+
+  const [data, setData] = useState<ListMailResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [agentOptions, setAgentOptions] = useState<string[]>([viewingAs.ownerAlias]);
@@ -31,14 +52,23 @@ export function MailPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.listMail(box, viewingAs.alias);
-      setItems(data.items);
+      const result = await api.listMail({
+        box,
+        alias: box === 'all' ? undefined : viewingAs.alias,
+        from: fromFilter || undefined,
+        to: toFilter || undefined,
+        subject: subjectFilter || undefined,
+        after: afterFilter || undefined,
+        before: beforeFilter || undefined,
+        cursor: cursor ?? undefined,
+      });
+      setData(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'failed to load');
     } finally {
       setLoading(false);
     }
-  }, [box, viewingAs.alias]);
+  }, [box, viewingAs.alias, fromFilter, toFilter, subjectFilter, afterFilter, beforeFilter, cursor]);
 
   useEffect(() => {
     void refresh();
@@ -70,7 +100,9 @@ export function MailPage() {
       if (!mail.thread_id) return;
       setThreadLoading(true);
       try {
-        const data = await api.getThread(mail.thread_id, viewingAs.alias);
+        // cd-5cxk: alias-less thread lookup in 'all' mode — backend
+        // skips the owner-alias bridge and filters by thread_id only.
+        const data = await api.getThread(mail.thread_id, box === 'all' ? undefined : viewingAs.alias);
         setThreadItems(data.items);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'thread failed');
@@ -78,21 +110,89 @@ export function MailPage() {
         setThreadLoading(false);
       }
     },
-    [viewingAs.alias],
+    [box, viewingAs.alias],
   );
 
-  const columns = useMemo<ReadonlyArray<TableColumn<GcMailItem>>>(() => [
-    {
-      key: 'from',
-      label: 'From',
-      sortable: true,
-      sortValue: (r) => r.from,
-      render: (r) => (
-        <span className="text-ink-100 text-xs">{r.from}</span>
-      ),
-      className: 'w-40',
-    },
-    {
+  // cd-5cxk: URL helpers — mutate a single search param while preserving
+  // the rest, except that any filter / box change resets the cursor
+  // (the offset is sort-and-filter dependent).
+  const setUrlParam = useCallback((key: string, value: string | null) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value === null || value === '') next.delete(key);
+        else next.set(key, value);
+        next.delete('cursor');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
+  const goToCursor = useCallback((c: string | null) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (c === null) next.delete('cursor');
+        else next.set('cursor', c);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
+  const clearAllFilters = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        // Preserve box; drop the rest (filters + cursor).
+        const b = next.get('box');
+        const fresh = new URLSearchParams();
+        if (b) fresh.set('box', b);
+        return fresh;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
+  const hasActiveFilters =
+    fromFilter.length > 0
+    || toFilter.length > 0
+    || subjectFilter.length > 0
+    || afterFilter.length > 0
+    || beforeFilter.length > 0;
+
+  const items = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const pageSize = data?.page_size ?? 50;
+  const upstreamCapped = data?.upstream_capped ?? false;
+
+  // cd-5cxk: in 'all' mode we want From AND To columns visible because
+  // both vary. In box=inbox the recipient is always the viewing alias,
+  // so From is the interesting column. In box=sent the sender is fixed.
+  const columns = useMemo<ReadonlyArray<TableColumn<GcMailItem>>>(() => {
+    const out: TableColumn<GcMailItem>[] = [];
+    if (box !== 'sent') {
+      out.push({
+        key: 'from',
+        label: 'From',
+        sortable: true,
+        sortValue: (r) => r.from,
+        render: (r) => <span className="text-ink-100 text-xs">{r.from}</span>,
+        className: 'w-40',
+      });
+    }
+    if (box === 'all' || box === 'sent') {
+      out.push({
+        key: 'to',
+        label: 'To',
+        sortable: true,
+        sortValue: (r) => r.to,
+        render: (r) => <span className="text-ink-100 text-xs">{r.to}</span>,
+        className: 'w-40',
+      });
+    }
+    out.push({
       key: 'subject',
       label: 'Subject',
       sortable: true,
@@ -107,8 +207,8 @@ export function MailPage() {
           </p>
         </div>
       ),
-    },
-    {
+    });
+    out.push({
       key: 'created_at',
       label: 'When',
       sortable: true,
@@ -119,8 +219,13 @@ export function MailPage() {
         </span>
       ),
       className: 'w-24',
-    },
-  ], []);
+    });
+    return out;
+  }, [box]);
+
+  const emptyMessage = box === 'all'
+    ? (hasActiveFilters ? 'No mail matches the active filters' : 'No mail in the city store')
+    : `${box === 'inbox' ? 'Inbox' : 'Sent'} is empty for ${viewingAs.alias}`;
 
   return (
     <section className="space-y-3">
@@ -129,7 +234,11 @@ export function MailPage() {
           <div>
             <h1 className="text-lg font-sans font-semibold text-ink-100">Mail</h1>
             <p className="text-xs text-ink-300">
-              Read any agent's inbox. Sends always go out as <code className="font-sans">{viewingAs.ownerAlias}</code>.
+              {box === 'all' ? (
+                'All city mail across every sender/recipient. Power-user view.'
+              ) : (
+                <>Read any agent's inbox. Sends always go out as <code className="font-sans">{viewingAs.ownerAlias}</code>.</>
+              )}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -153,19 +262,48 @@ export function MailPage() {
           </div>
         </div>
 
-        <IdentitySwitcher
-          options={agentOptions}
-          value={viewingAs.alias}
-          onChange={setAlias}
-          onReset={resetToOwner}
-          isOwner={viewingAs.isOwner}
-          ownerAlias={viewingAs.ownerAlias}
-        />
+        {/* cd-5cxk: the viewing-as switcher only meaningfully filters
+            inbox + sent (which key off the alias). In 'all' mode it's
+            inert — hide it to reduce visual noise + signal that the
+            view ignores identity. */}
+        {box !== 'all' && (
+          <IdentitySwitcher
+            options={agentOptions}
+            value={viewingAs.alias}
+            onChange={setAlias}
+            onReset={resetToOwner}
+            isOwner={viewingAs.isOwner}
+            ownerAlias={viewingAs.ownerAlias}
+          />
+        )}
 
         <div className="flex items-center gap-1 text-xs">
-          <BoxTab active={box === 'inbox'} onClick={() => setBox('inbox')} label="Inbox" />
-          <BoxTab active={box === 'sent'} onClick={() => setBox('sent')} label="Sent" />
+          <BoxTab active={box === 'inbox'} onClick={() => setUrlParam('box', null)} label="Inbox" />
+          <BoxTab active={box === 'sent'} onClick={() => setUrlParam('box', 'sent')} label="Sent" />
+          <BoxTab active={box === 'all'} onClick={() => setUrlParam('box', 'all')} label="All mail" />
         </div>
+
+        {box === 'all' && (
+          <MailFilterBar
+            from={fromFilter}
+            to={toFilter}
+            subject={subjectFilter}
+            after={afterFilter}
+            before={beforeFilter}
+            onChange={setUrlParam}
+            onClear={clearAllFilters}
+            active={hasActiveFilters}
+            total={total}
+          />
+        )}
+
+        {upstreamCapped && (
+          <div className="rounded-md border border-warn-500/40 bg-warn-500/10 px-3 py-1.5 text-xs text-warn-500">
+            Upstream cap hit ({total} matched within the latest ~1000 mail items).
+            Older mail outside that window is not represented; tighten the
+            <code className="font-sans"> after</code> filter to advance the window.
+          </div>
+        )}
       </header>
 
       <div className="panel">
@@ -176,16 +314,29 @@ export function MailPage() {
           rows={items}
           rowKey={(r) => r.id}
           onRowClick={(r) => void openThread(r)}
-          empty={`${box === 'inbox' ? 'Inbox' : 'Sent'} is empty for ${viewingAs.alias}`}
+          empty={emptyMessage}
           initialSort={{ key: 'created_at', dir: 'desc' }}
         />
       </div>
+
+      <MailPagination
+        prevCursor={data?.prev_cursor ?? null}
+        nextCursor={data?.next_cursor ?? null}
+        onPage={goToCursor}
+        pageSize={pageSize}
+        total={total}
+        disabled={loading}
+      />
 
       <Modal
         open={threadFor !== null}
         onClose={() => setThreadFor(null)}
         title={threadFor?.subject ?? 'Thread'}
-        caption={`viewing as ${viewingAs.alias} · ${threadItems.length} message(s)`}
+        caption={
+          box === 'all'
+            ? `all mail · ${threadItems.length} message(s)`
+            : `viewing as ${viewingAs.alias} · ${threadItems.length} message(s)`
+        }
         widthClass="max-w-3xl"
       >
         {threadLoading ? (
@@ -212,6 +363,134 @@ export function MailPage() {
         }}
       />
     </section>
+  );
+}
+
+// cd-5cxk: filter input row for the All-mail view. Each field updates
+// the URL on change (with cursor reset). 'after' / 'before' are
+// type="date" inputs that produce YYYY-MM-DD strings — backend ISO_RE
+// accepts both date-only and full instants.
+function MailFilterBar({
+  from, to, subject, after, before,
+  onChange, onClear, active, total,
+}: {
+  from: string;
+  to: string;
+  subject: string;
+  after: string;
+  before: string;
+  onChange: (key: string, value: string | null) => void;
+  onClear: () => void;
+  active: boolean;
+  total: number;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <FilterInput label="From" value={from} onChange={(v) => onChange('from', v)} placeholder="sender substring" />
+        <FilterInput label="To" value={to} onChange={(v) => onChange('to', v)} placeholder="recipient substring" />
+        <FilterInput label="Subject" value={subject} onChange={(v) => onChange('subject', v)} placeholder="subject substring" />
+        <label className="flex items-center gap-1.5">
+          <span className="text-ink-300">After</span>
+          <input
+            type="date"
+            value={after}
+            onChange={(e) => onChange('after', e.target.value || null)}
+            className="bg-ink-900 border border-ink-600 rounded-md px-2 py-1 text-xs text-ink-100 focus:outline-none focus:ring-2 focus:ring-accent-500"
+          />
+        </label>
+        <label className="flex items-center gap-1.5">
+          <span className="text-ink-300">Before</span>
+          <input
+            type="date"
+            value={before}
+            onChange={(e) => onChange('before', e.target.value || null)}
+            className="bg-ink-900 border border-ink-600 rounded-md px-2 py-1 text-xs text-ink-100 focus:outline-none focus:ring-2 focus:ring-accent-500"
+          />
+        </label>
+      </div>
+      {active && (
+        <div className="rounded-md border border-accent-700/40 bg-accent-700/10 px-3 py-1.5 text-xs text-accent-500 flex items-center justify-between gap-3">
+          <span>Filtering · {total} message{total === 1 ? '' : 's'} match</span>
+          <button
+            type="button"
+            onClick={onClear}
+            className="underline decoration-dotted hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 rounded-sm"
+          >
+            clear all
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FilterInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string | null) => void;
+  placeholder?: string;
+}) {
+  return (
+    <label className="flex items-center gap-1.5">
+      <span className="text-ink-300">{label}</span>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value || null)}
+        placeholder={placeholder}
+        maxLength={128}
+        className="bg-ink-900 border border-ink-600 rounded-md px-2 py-1 text-xs text-ink-100 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-accent-500 w-44"
+      />
+    </label>
+  );
+}
+
+function MailPagination({
+  prevCursor,
+  nextCursor,
+  onPage,
+  pageSize,
+  total,
+  disabled,
+}: {
+  prevCursor: string | null;
+  nextCursor: string | null;
+  onPage: (cursor: string | null) => void;
+  pageSize: number;
+  total: number;
+  disabled: boolean;
+}) {
+  if (prevCursor === null && nextCursor === null && total <= pageSize) return null;
+  return (
+    <div className="flex items-center justify-between gap-2 text-xs text-ink-300">
+      <span>
+        Page size {pageSize} · {total} total
+      </span>
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          tone="ghost"
+          disabled={prevCursor === null || disabled}
+          onClick={() => onPage(prevCursor)}
+        >
+          ← Prev
+        </Button>
+        <Button
+          size="sm"
+          tone="ghost"
+          disabled={nextCursor === null || disabled}
+          onClick={() => onPage(nextCursor)}
+        >
+          Next →
+        </Button>
+      </div>
+    </div>
   );
 }
 
