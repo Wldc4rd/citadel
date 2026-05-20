@@ -164,4 +164,11 @@ export const api = {
   closedBeads(): Promise<{ items: GcBead[]; total: number }> {
     return request('GET', '/api/admin/closed-beads');
   },
+  // cd-i81q: composed behavioural prompt for an agent (gc prime
+  // --strict <alias>). Read-only — the bead's edit-and-save stretch
+  // goal is deferred (high-blast-radius file-write outside the
+  // current exec whitelist).
+  agentPrime(alias: string): Promise<{ agent: string; prompt: string; bytes: number }> {
+    return request('GET', `/api/agents/${encodeURIComponent(alias)}/prime`);
+  },
 };
