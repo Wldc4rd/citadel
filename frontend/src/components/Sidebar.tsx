@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useViewingAs } from '../contexts/ViewingAsContext';
 import { useAppConfig } from '../api/appConfig';
 
@@ -24,15 +24,25 @@ export function Sidebar() {
   const { viewingAs } = useViewingAs();
   const cfg = useAppConfig();
   const cityLabel = cfg?.city ?? '…';
+  const location = useLocation();
+  // cd-64ol: the viewing-as chip implies a global identity swap, but
+  // the only surface that actually honours the alias is Mail (mail.ts
+  // /api/mail filters by it; nothing else reads it). Showing the chip
+  // on /cockpit, /beads, /agents etc. was misleading. Scope it to the
+  // mail route so the indicator reads as the mail-context it really is.
+  // The alias state itself is preserved across navigation — going back
+  // to /mail still shows the chosen identity. The visibility-change
+  // auto-revert in ViewingAsContext still applies as the safety net.
+  const isOnMailRoute = location.pathname === '/mail' || location.pathname.startsWith('/mail/');
   return (
     <nav className="w-56 shrink-0 border-r border-ink-700 bg-ink-800 px-3 py-4 flex flex-col">
       <div className="px-2 mb-4">
         <p className="text-xs uppercase tracking-widest text-ink-300">{cityLabel}</p>
         <p className="font-sans text-sm font-semibold text-ink-100">admin</p>
       </div>
-      {!viewingAs.isCharlie && (
+      {!viewingAs.isCharlie && isOnMailRoute && (
         <div className="px-2 py-1.5 mb-3 rounded-md border border-warn-500/40 bg-warn-500/10 text-warn-500 text-[11px]">
-          <span className="uppercase tracking-wider font-semibold block">viewing as</span>
+          <span className="uppercase tracking-wider font-semibold block">mail · viewing as</span>
           <span className="block truncate">{viewingAs.alias}</span>
           <span className="block text-[10px] text-warn-500/80 mt-0.5">read-only · reverts on tab hide</span>
         </div>
