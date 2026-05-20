@@ -259,17 +259,29 @@ export async function execMailSend(
 // 200 (matches main's typical commit frequency * ~2 weeks); recent-all
 // bumped to 200 too. The since= variants are time-windowed, not count-
 // windowed, so no explicit cap needed — git's default for those is fine.
+//
+// cd-q9cu: pretty format uses %cI (committer date) and multi-ref views
+// pass --date-order. Previously the format was %aI (author date) which
+// disagreed with git log's default committer-date sort whenever a
+// commit had been rebased — rebased commits have an old author date
+// but a fresh committer date, so the list APPEARED unsorted to the
+// reader even though git's internal order was correct. Sorting and
+// displaying on the same date (commit date) keeps them in lockstep.
+// --date-order is defensive on multi-ref walks where the default order
+// can vary with topology; for single-ref (recent-main) it's a no-op
+// but harmless.
 const GIT_LOG_VIEWS: Record<string, string[]> = {
   'recent-main': [
     'log',
-    '--pretty=format:%H%x09%h%x09%an%x09%aI%x09%D%x09%s',
+    '--pretty=format:%H%x09%h%x09%an%x09%cI%x09%D%x09%s',
     '-n',
     '200',
     'origin/main',
   ],
   'recent-all': [
     'log',
-    '--pretty=format:%H%x09%h%x09%an%x09%aI%x09%D%x09%s',
+    '--date-order',
+    '--pretty=format:%H%x09%h%x09%an%x09%cI%x09%D%x09%s',
     '-n',
     '200',
     '--branches',
@@ -277,14 +289,16 @@ const GIT_LOG_VIEWS: Record<string, string[]> = {
   ],
   today: [
     'log',
-    '--pretty=format:%H%x09%h%x09%an%x09%aI%x09%D%x09%s',
+    '--date-order',
+    '--pretty=format:%H%x09%h%x09%an%x09%cI%x09%D%x09%s',
     '--since=24.hours.ago',
     '--branches',
     '--remotes',
   ],
   'this-week': [
     'log',
-    '--pretty=format:%H%x09%h%x09%an%x09%aI%x09%D%x09%s',
+    '--date-order',
+    '--pretty=format:%H%x09%h%x09%an%x09%cI%x09%D%x09%s',
     '--since=7.days.ago',
     '--branches',
     '--remotes',

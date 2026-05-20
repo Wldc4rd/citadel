@@ -13,7 +13,11 @@ const VIEWS: ReadonlySet<GitView> = new Set([
   'this-week',
 ] as const);
 
-const PRETTY_FORMAT = '%H%x09%h%x09%an%x09%aI%x09%D%x09%s';
+// Mirror of the format string in exec.ts::GIT_LOG_VIEWS so consumers
+// reading git.ts see what the parsed columns are. The runtime invocation
+// uses the inline copy in exec.ts — keep them in lockstep.
+// cd-q9cu: %cI (committer date) not %aI — see exec.ts comment.
+const PRETTY_FORMAT = '%H%x09%h%x09%an%x09%cI%x09%D%x09%s';
 
 export function gitRouter(): Router {
   const router = Router();
