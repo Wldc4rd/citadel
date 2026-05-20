@@ -4,6 +4,7 @@ import type { BeadDetailResponse, GcSession } from 'citadel-shared';
 import { api, ApiClientError } from '../api/client';
 import { Button } from '../components/Button';
 import { useGcEventRefresh } from '../hooks/useGcEvents';
+import { useViewingAs } from '../contexts/ViewingAsContext';
 
 // Bead drill-in (td-384rhs). Route /beads/:beadId.
 //
@@ -32,6 +33,7 @@ export function BeadDetailPage() {
   const { beadId = '' } = useParams<{ beadId: string }>();
   const navigate = useNavigate();
   const decoded = useMemo(() => decodeURIComponent(beadId), [beadId]);
+  const { viewingAs } = useViewingAs();
 
   const [detail, setDetail] = useState<BeadDetailResponse | null>(null);
   const [sessions, setSessions] = useState<GcSession[] | null>(null);
@@ -122,7 +124,7 @@ export function BeadDetailPage() {
     setActionFeedback(null);
     try {
       await api.claimBead(detail.bead.id);
-      setActionFeedback('Claimed (refresh in progress).');
+      setActionFeedback(`Claimed as ${viewingAs.ownerAlias} (refresh in progress).`);
       void refresh();
     } catch (err) {
       setActionFeedback(`Claim failed: ${err instanceof Error ? err.message : 'unknown'}`);
@@ -210,7 +212,7 @@ export function BeadDetailPage() {
           {b.status !== 'closed' && (
             <>
               <Button size="sm" onClick={handleClaim} disabled={actionRunning !== null}>
-                {actionRunning === 'claim' ? 'Claiming…' : 'Claim'}
+                {actionRunning === 'claim' ? 'Claiming…' : `Claim as ${viewingAs.ownerAlias}`}
               </Button>
               <Button
                 size="sm"

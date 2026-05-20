@@ -223,18 +223,29 @@ export interface GcMailList {
   total?: number;
 }
 
-/** Frontend "viewing as" context state. Default identity is Charlie ('charlie'). */
+/**
+ * Frontend "viewing as" context state. The operator's wire identity is
+ * configurable via backend env GC_CITY_OWNER_ALIAS (surfaced as
+ * `owner_alias` in /api/config/gc-supervisor), default `'human'`.
+ */
 export interface ViewingAs {
+  /** Current viewing identity — what mail queries / dashboard reads use. */
   alias: string;
-  /** True iff alias === 'charlie' (the sole identity that can send). */
-  isCharlie: boolean;
+  /** The configured operator alias — the alias to revert to and the sole identity that can send. */
+  ownerAlias: string;
+  /** True iff alias === ownerAlias (the operator-equivalent identity). */
+  isOwner: boolean;
 }
 
 /**
  * Compose payload — the SINGLE wire shape the mail-send router accepts.
  * Architect (security_researcher td-wisp-eb0pn) explicit: no `from` field;
- * server hardcodes the Charlie identity. Frontend cannot trick the server
- * into sending as someone else because there's no slot in the shape.
+ * server hardcodes the wire identity (`--from human`). Frontend cannot
+ * trick the server into sending as someone else because there's no slot
+ * in the shape. The dashboard's GC_CITY_OWNER_ALIAS knob (td-4k317p) is
+ * separate — it controls the displayed operator identity, assignee on
+ * claim, mail filter default, and audit actor. The wire sender is
+ * physical-separation locked to `'human'` independent of that knob.
  */
 export interface MailComposeRequest {
   to: string;
@@ -557,11 +568,22 @@ export interface ApiError {
 export interface AdminAuditEvent {
   type: 'dashboard.exec' | 'dashboard.fetch' | 'dashboard.send_mail' | string;
   endpoint: string;
-  actor: 'charlie';
+  /** The dashboard operator's alias — configured via GC_CITY_OWNER_ALIAS, default `'human'`. */
+  actor: string;
   /** Identity the parent was viewing AS at the time. NEVER affects sender. */
   viewing_as?: string;
   parsed_args?: Record<string, string>;
   exit_code?: number;
   duration_ms?: number;
   ts: IsoTimestamp;
+}
+
+/** Response shape of GET /api/config/gc-supervisor — the frontend bootstrap config. */
+export interface GcSupervisorConfigResponse {
+  /** gc supervisor base URL (no trailing slash). */
+  supervisor_url: string;
+  /** City name this dashboard manages. */
+  city: string;
+  /** Configured operator alias (GC_CITY_OWNER_ALIAS, default `'human'`). */
+  owner_alias: string;
 }

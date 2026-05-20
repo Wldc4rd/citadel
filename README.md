@@ -59,6 +59,7 @@ All knobs are environment variables. See [`backend/src/config.ts`](backend/src/c
 | `ADMIN_EXTRA_ALLOWED_HOSTS` | (empty) | CSV of extra hostnames allowed in the `Host:` header (e.g. `my-vm,192.168.1.58`). The floor `127.0.0.1`/`localhost` is always allowed. |
 | `GC_SUPERVISOR_URL` | `http://127.0.0.1:8372` | gc supervisor API base URL |
 | `GC_CITY_NAME` | `thriva-dev` | Name of the city this dashboard manages (one dashboard per city) |
+| `GC_CITY_OWNER_ALIAS` | `human` | The dashboard operator's wire identity — used as bead `--assignee` on claim, mail-filter default, audit `actor`, and the frontend's default `viewing-as`. Set to e.g. `charlie` to preserve the historical Charlie-deploy assignee/routing. Wire identity for the mail-send path is structurally locked to `'human'` regardless. |
 | `ADMIN_AUDIT_LOG_PATH` | (gc's `events.jsonl`) | Where state-changing actions append audit entries |
 | `ADMIN_FRONTEND_DIST` | `../frontend/dist` | Path to built frontend assets |
 | `ADMIN_DOLT_NOMS_ROOT` | `/home/charlie/thriva-dev/.beads/dolt` | Root of the bd-store Dolt tree the Health sparkline samples (10-min cadence). Set to `""` to disable. |

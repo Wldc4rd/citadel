@@ -20,7 +20,7 @@ import { buildsRouter } from './routes/builds.js';
 import { healthRouter } from './routes/health.js';
 import { doltRouter, startDoltNomsSampler } from './routes/dolt.js';
 import { adminRouter } from './routes/admin.js';
-import { setAuditLogPath } from './audit.js';
+import { setAuditLogPath, setAuditOwnerAlias } from './audit.js';
 import {
   buildSupervisorCspSources,
   rewriteSupervisorUrlForBrowser,
@@ -37,6 +37,7 @@ function main(): void {
   }
 
   setAuditLogPath(config.auditLogPath);
+  setAuditOwnerAlias(config.cityOwnerAlias);
 
   const app = express();
   app.disable('x-powered-by');
@@ -74,8 +75,8 @@ function main(): void {
   const writeRouter = express.Router();
   writeRouter.use(csrfValidate);
   writeRouter.use('/sessions', sessionsRouter(gc));
-  writeRouter.use('/beads', beadsRouter(gc, config.cityPath));
-  writeRouter.use('/mail', mailRouter(gc));
+  writeRouter.use('/beads', beadsRouter(gc, config.cityPath, config.cityOwnerAlias));
+  writeRouter.use('/mail', mailRouter(gc, config.cityOwnerAlias));
   // mail-send is a SEPARATE router mounted at its own path. The handler in
   // mail-send.ts has no `viewing-as` parameter — physical separation per
   // architect th-1i30ih §"Identity-switching for mail".
@@ -95,7 +96,10 @@ function main(): void {
   // it; this endpoint is the one place that surfaces it to the browser
   // so the URL isn't hardcoded in two places. When the configured URL
   // is loopback, the URL handed to the browser is rewritten to use the
-  // same hostname the browser used to reach us (cd-7d6n).
+  // same hostname the browser used to reach us (cd-7d6n). `owner_alias`
+  // is bootstrap identity for the frontend (td-4k317p): ViewingAsContext
+  // defaults to it, "Claim as X" / "Sends as X" UI strings render it.
+  // Default `'human'` matches the backend's GC_CITY_OWNER_ALIAS floor.
   app.get('/api/config/gc-supervisor', (req, res) => {
     res.json({
       supervisor_url: rewriteSupervisorUrlForBrowser(
@@ -104,6 +108,7 @@ function main(): void {
         config.extraAllowedHosts,
       ),
       city: config.cityName,
+      owner_alias: config.cityOwnerAlias,
     });
   });
 

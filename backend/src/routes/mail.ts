@@ -16,13 +16,13 @@ const BOX_VALUES = new Set(['inbox', 'sent', 'all']);
 // would need a separate v1 design if the corpus grows past 2-3× this.
 const FETCH_LIMIT = 1000;
 
-export function mailRouter(gc: GcClient): Router {
+export function mailRouter(gc: GcClient, ownerAlias: string): Router {
   const router = Router();
 
   router.get('/', async (req, res) => {
-    const rawAlias = typeof req.query.alias === 'string' ? req.query.alias : 'charlie';
+    const rawAlias = typeof req.query.alias === 'string' ? req.query.alias : ownerAlias;
     const rawBox = typeof req.query.box === 'string' ? req.query.box : 'inbox';
-    const alias = ALIAS_RE.test(rawAlias) ? rawAlias : 'charlie';
+    const alias = ALIAS_RE.test(rawAlias) ? rawAlias : ownerAlias;
     const box: 'inbox' | 'sent' | 'all' = BOX_VALUES.has(rawBox)
       ? (rawBox as 'inbox' | 'sent' | 'all')
       : 'inbox';
@@ -70,8 +70,8 @@ export function mailRouter(gc: GcClient): Router {
       res.status(400).json({ error: 'invalid thread id', kind: 'validation' });
       return;
     }
-    const rawAlias = typeof req.query.alias === 'string' ? req.query.alias : 'charlie';
-    const alias = ALIAS_RE.test(rawAlias) ? rawAlias : 'charlie';
+    const rawAlias = typeof req.query.alias === 'string' ? req.query.alias : ownerAlias;
+    const alias = ALIAS_RE.test(rawAlias) ? rawAlias : ownerAlias;
     try {
       const [inbox, sent] = await Promise.all([
         gc.listMail(undefined, { box: 'inbox', alias }),
@@ -107,15 +107,19 @@ export function mailRouter(gc: GcClient): Router {
   return router;
 }
 
-// The dashboard owner has a display alias ('charlie') distinct from
+// The dashboard owner can have a display alias ('charlie') distinct from
 // their gc-wire alias ('human'). exec.ts pins --from=human on mail-send,
 // and inbound mail for the dashboard owner is also addressed to 'human'.
 // Without this expansion, viewing-as-charlie returns an empty inbox even
 // when there are 5+ messages addressed to 'human' (cd-d9db).
 //
 // Symmetric so 'human' selected manually shows the same view. Hardcodes
-// the charlie↔human pair; making this config-driven for non-Charlie
-// adopters is part of td-4k317p (cd-c6oc multi-tenancy follow-up).
+// the charlie↔human pair; td-4k317p made the DISPLAY alias config-driven
+// (GC_CITY_OWNER_ALIAS, default 'human') but kept this wire-alias bridge
+// hardcoded — a non-Charlie deploy with an asymmetric display/wire pair
+// (e.g. operator's display='alice' but wire='human') would still need
+// to add their pair here. Filed as follow-up for env-driven
+// OWNER_WIRE_ALIASES (e.g. GC_CITY_OWNER_WIRE_ALIAS='alice:human').
 const OWNER_ALIASES: ReadonlyArray<[string, string]> = [['charlie', 'human']];
 
 function expandOwnerAlias(alias: string): Set<string> {

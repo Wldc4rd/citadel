@@ -8,16 +8,27 @@ import type { AdminAuditEvent } from 'citadel-shared';
 // reasonable sizes on POSIX.
 
 let logPath = '/home/charlie/thriva-dev/.gc/events.jsonl';
+// 'human' is the safe out-of-the-box default — matches the backend config
+// default GC_CITY_OWNER_ALIAS and gc's canonical wire identity. server.ts
+// calls setAuditOwnerAlias(config.cityOwnerAlias) at startup; until then
+// (or in tests that import recordAudit without going through server.ts),
+// audit rows fall back to this floor instead of the historical literal
+// 'charlie' which assumed a Charlie deploy.
+let ownerAlias = 'human';
 
 export function setAuditLogPath(p: string): void {
   logPath = p;
+}
+
+export function setAuditOwnerAlias(alias: string): void {
+  ownerAlias = alias;
 }
 
 export async function recordAudit(
   event: Omit<AdminAuditEvent, 'ts' | 'actor'> & Partial<Pick<AdminAuditEvent, 'actor'>>,
 ): Promise<void> {
   const row: AdminAuditEvent = {
-    actor: 'charlie',
+    actor: ownerAlias,
     ts: new Date().toISOString(),
     ...event,
   };

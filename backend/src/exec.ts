@@ -167,14 +167,22 @@ function sanitiseTerminalOutput(raw: string): string {
 export async function execBeadAction(
   beadId: string,
   action: 'claim' | 'close' | 'nudge',
+  ownerAlias: string,
   reason?: string,
 ): Promise<ExecResult> {
   if (!BEAD_ID_RE.test(beadId)) {
     throw new ExecError('invalid bead id', 'validation');
   }
+  // ownerAlias is the assignee for `claim`. Validate against the same shape
+  // bd accepts for assignees — the alias regex is the auth boundary here
+  // (the value flows through to `gc bd update --assignee=<v>` with
+  // shell:false but the bd CLI itself enforces alias format too).
+  if (action === 'claim' && !AGENT_ALIAS_RE.test(ownerAlias)) {
+    throw new ExecError('invalid owner alias', 'validation');
+  }
   const args: string[] = ['bd'];
   if (action === 'claim') {
-    args.push('update', beadId, '--status=in_progress', '--assignee=charlie');
+    args.push('update', beadId, '--status=in_progress', `--assignee=${ownerAlias}`);
   } else if (action === 'close') {
     args.push('close', beadId);
     if (typeof reason === 'string' && reason.length > 0 && reason.length <= 1024) {

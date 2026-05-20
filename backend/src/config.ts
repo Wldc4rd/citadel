@@ -17,6 +17,19 @@ export interface AdminConfig {
   /** Name of the city this admin dashboard manages. */
   cityName: string;
   /**
+   * The dashboard operator's wire identity ("who is using this dashboard
+   * right now"). Used as: bead `--assignee` on claim, mail-filter default,
+   * audit `actor`, and the frontend's default `viewing-as`. Default
+   * `'human'` is gc's canonical wire identity (see exec.ts mail-send note)
+   * so a fresh install talks to gc with a real assignee. Existing Charlie
+   * deploys override via `GC_CITY_OWNER_ALIAS=charlie` to keep the bead
+   * routing-by-assignee invariant they had pre-config-driven.
+   * NB: wire identity for /mail-send remains `'human'` regardless — that
+   * is physical-separation per security_researcher td-wisp-eb0pn and is
+   * NOT this knob's surface.
+   */
+  cityOwnerAlias: string;
+  /**
    * Filesystem path to the city root (the dir holding city.toml). Used
    * by shell-exec paths that need `gc --city=<path>` because gc's name
    * resolution treats `--city=<name>` as a relative path, not a
@@ -55,6 +68,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AdminConfig {
     extraAllowedHosts,
     gcSupervisorUrl: (env.GC_SUPERVISOR_URL ?? 'http://127.0.0.1:8372').replace(/\/+$/, ''),
     cityName: env.GC_CITY_NAME ?? 'thriva-dev',
+    cityOwnerAlias: env.GC_CITY_OWNER_ALIAS ?? 'human',
     cityPath: env.GC_CITY_PATH ?? '/home/charlie/thriva-dev',
     auditLogPath:
       env.ADMIN_AUDIT_LOG_PATH ?? '/home/charlie/thriva-dev/.gc/events.jsonl',

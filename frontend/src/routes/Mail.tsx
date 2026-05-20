@@ -4,7 +4,7 @@ import { api, ApiClientError } from '../api/client';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
 import { Table, type TableColumn } from '../components/Table';
-import { useViewingAs, CHARLIE_ALIAS } from '../contexts/ViewingAsContext';
+import { useViewingAs } from '../contexts/ViewingAsContext';
 
 const PROMPT_INJECTION_NOTICE =
   'Content is agent-generated and may contain misleading instructions.';
@@ -12,12 +12,12 @@ const PROMPT_INJECTION_NOTICE =
 type MailBox = 'inbox' | 'sent';
 
 export function MailPage() {
-  const { viewingAs, setAlias, resetToCharlie } = useViewingAs();
+  const { viewingAs, setAlias, resetToOwner } = useViewingAs();
   const [box, setBox] = useState<MailBox>('inbox');
   const [items, setItems] = useState<GcMailItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [agentOptions, setAgentOptions] = useState<string[]>([CHARLIE_ALIAS]);
+  const [agentOptions, setAgentOptions] = useState<string[]>([viewingAs.ownerAlias]);
 
   const [threadFor, setThreadFor] = useState<GcMailItem | null>(null);
   const [threadItems, setThreadItems] = useState<GcMailItem[]>([]);
@@ -48,7 +48,7 @@ export function MailPage() {
     void (async () => {
       try {
         const { items: sessions } = await api.listSessions();
-        const aliases = new Set<string>([CHARLIE_ALIAS]);
+        const aliases = new Set<string>([viewingAs.ownerAlias]);
         for (const s of sessions as GcSession[]) {
           if (s.alias && /^[a-z][a-z0-9_./-]{1,63}$/i.test(s.alias)) {
             aliases.add(s.alias);
@@ -56,10 +56,10 @@ export function MailPage() {
         }
         setAgentOptions(Array.from(aliases).sort());
       } catch {
-        /* fall back to the single charlie option already set */
+        /* fall back to the single owner-alias option already set */
       }
     })();
-  }, []);
+  }, [viewingAs.ownerAlias]);
 
   const openThread = useCallback(
     async (mail: GcMailItem) => {
@@ -127,7 +127,7 @@ export function MailPage() {
           <div>
             <h1 className="text-lg font-sans font-semibold text-ink-100">Mail</h1>
             <p className="text-xs text-ink-300">
-              Read any agent's inbox. Sends always go out as the dashboard owner.
+              Read any agent's inbox. Sends always go out as <code className="font-sans">{viewingAs.ownerAlias}</code>.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -136,11 +136,11 @@ export function MailPage() {
               tone="accent"
               size="sm"
               onClick={() => setComposing(true)}
-              disabled={!viewingAs.isCharlie}
+              disabled={!viewingAs.isOwner}
               title={
-                viewingAs.isCharlie
-                  ? 'Compose a new message'
-                  : 'Switch back to your default identity to compose'
+                viewingAs.isOwner
+                  ? `Compose a new message (sends as ${viewingAs.ownerAlias})`
+                  : `Switch back to ${viewingAs.ownerAlias} to compose`
               }
             >
               Compose
@@ -155,8 +155,9 @@ export function MailPage() {
           options={agentOptions}
           value={viewingAs.alias}
           onChange={setAlias}
-          onReset={resetToCharlie}
-          isCharlie={viewingAs.isCharlie}
+          onReset={resetToOwner}
+          isOwner={viewingAs.isOwner}
+          ownerAlias={viewingAs.ownerAlias}
         />
 
         <div className="flex items-center gap-1 text-xs">
@@ -217,24 +218,26 @@ function IdentitySwitcher({
   value,
   onChange,
   onReset,
-  isCharlie,
+  isOwner,
+  ownerAlias,
 }: {
   options: string[];
   value: string;
   onChange: (v: string) => void;
   onReset: () => void;
-  isCharlie: boolean;
+  isOwner: boolean;
+  ownerAlias: string;
 }) {
   return (
     <div
       className={`rounded-md border px-3 py-2 flex items-center gap-3 flex-wrap text-xs ${
-        isCharlie
+        isOwner
           ? 'border-ink-600 bg-ink-800/60 text-ink-300'
           : 'border-warn-500/40 bg-warn-500/10 text-warn-500'
       }`}
     >
       <span className="uppercase tracking-wider font-semibold">
-        {isCharlie ? 'viewing as' : '⚠ viewing as'}
+        {isOwner ? 'viewing as' : '⚠ viewing as'}
       </span>
       <label className="flex items-center gap-2">
         <select
@@ -249,18 +252,18 @@ function IdentitySwitcher({
           ))}
         </select>
       </label>
-      {!isCharlie && (
+      {!isOwner && (
         <button
           type="button"
           onClick={onReset}
           className="underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warn-500 rounded-sm"
         >
-          back to default
+          back to {ownerAlias}
         </button>
       )}
-      {!isCharlie && (
+      {!isOwner && (
         <span className="ml-auto text-[11px] italic">
-          read-only · sends always from owner
+          read-only · sends are always from {ownerAlias}
         </span>
       )}
     </div>
@@ -362,14 +365,14 @@ function ComposeModal({
     }
   }, [body, onSent, subject, to]);
 
-  const canSend = viewingAs.isCharlie && to.length > 0 && subject.length > 0 && body.length > 0 && !sending;
+  const canSend = viewingAs.isOwner && to.length > 0 && subject.length > 0 && body.length > 0 && !sending;
 
   return (
     <Modal
       open={open}
       onClose={onClose}
       title="New message"
-      caption="Sends as the dashboard owner — viewing-as has no effect on the sender"
+      caption={`Sends as ${viewingAs.ownerAlias} — viewing-as has no effect on the sender`}
       widthClass="max-w-2xl"
       footer={
         <>
@@ -377,7 +380,7 @@ function ComposeModal({
             Cancel
           </Button>
           <Button tone="accent" size="sm" disabled={!canSend} onClick={() => void onSend()}>
-            {sending ? 'Sending…' : 'Send'}
+            {sending ? 'Sending…' : `Send as ${viewingAs.ownerAlias}`}
           </Button>
         </>
       }
@@ -387,7 +390,7 @@ function ComposeModal({
           From
           <input
             type="text"
-            value={viewingAs.isCharlie ? 'the dashboard owner' : 'the dashboard owner (viewing-as does not change sender)'}
+            value={viewingAs.isOwner ? viewingAs.ownerAlias : `${viewingAs.ownerAlias} (viewing-as does not change sender)`}
             disabled
             className="mt-1 w-full bg-ink-900 border border-ink-700 rounded-md px-2 py-1.5 text-sm font-sans text-ink-300 italic"
           />
@@ -423,9 +426,9 @@ function ComposeModal({
             className="mt-1 w-full bg-ink-900 border border-ink-600 rounded-md px-2 py-1.5 text-sm font-body text-ink-100 focus:border-accent-700 focus:outline-none focus:ring-2 focus:ring-accent-700/30 resize-y"
           />
         </label>
-        {!viewingAs.isCharlie && (
+        {!viewingAs.isOwner && (
           <p className="text-xs text-warn-500 bg-warn-500/10 border border-warn-500/30 rounded-md px-2 py-1">
-            You're viewing-as <code className="font-sans">{viewingAs.alias}</code>. Switch back to your default identity to compose; sends from this modal are structurally locked to the dashboard owner regardless.
+            You're viewing-as <code className="font-sans">{viewingAs.alias}</code>. Switch back to <code className="font-sans">{viewingAs.ownerAlias}</code> to compose; sends from this modal are structurally locked to <code className="font-sans">{viewingAs.ownerAlias}</code> regardless.
           </p>
         )}
         {error && (

@@ -87,7 +87,7 @@ systemd is boring, well-understood, and `journalctl`-debuggable. `ExecStartPre` 
 Five views ship in three milestones. Each milestone has an acceptance gate:
 
 - **Phase A (this commit)** — skeleton + Agents view + Beads view. *Gate*: Charlie can identify any session's state + peek tmux content without a shell; can see filtered beads + claim/close from the browser.
-- **Phase B** — Mail with identity-switching (view-as-X, sends-as-Charlie via separate router). *Gate*: Charlie can read any agent's thread cross-agent; verify every send logs `actor=charlie`.
+- **Phase B** — Mail with identity-switching (view-as-X, sends-as-owner via separate router). *Gate*: operator can read any agent's thread cross-agent; verify every send logs `actor=<owner>` where `<owner>` is `GC_CITY_OWNER_ALIAS` (default `'human'`, set `charlie` for the Charlie deploy).
 - **Phase C** — Activity (commits + builds) + Health (process + dolt-noms 24 h trend) + SSE wiring. *Gate*: Charlie can spot the refinery's last merge + memory pressure trend without terminal.
 
 Internal tool — the "anti-scope-reduction reflex" doesn't apply here. The five views are loosely coupled; phasing is logical build order, not feature cuts.

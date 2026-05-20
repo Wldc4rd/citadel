@@ -163,7 +163,7 @@ function compareForSort(a: GcBead, b: GcBead, sort: BeadSortKey, order: BeadSort
   return 0;
 }
 
-export function beadsRouter(gc: GcClient, cityPath: string): Router {
+export function beadsRouter(gc: GcClient, cityPath: string, ownerAlias: string): Router {
   const router = Router();
 
   router.get('/', async (req, res) => {
@@ -341,16 +341,16 @@ export function beadsRouter(gc: GcClient, cityPath: string): Router {
   });
 
   router.post('/:id/claim', async (req, res) => {
-    await runBeadAction(req.params.id, 'claim', undefined, res);
+    await runBeadAction(req.params.id, 'claim', ownerAlias, undefined, res);
   });
 
   router.post('/:id/close', async (req, res) => {
     const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
-    await runBeadAction(req.params.id, 'close', reason, res);
+    await runBeadAction(req.params.id, 'close', ownerAlias, reason, res);
   });
 
   router.post('/:id/nudge', async (req, res) => {
-    await runBeadAction(req.params.id, 'nudge', undefined, res);
+    await runBeadAction(req.params.id, 'nudge', ownerAlias, undefined, res);
   });
 
   return router;
@@ -359,6 +359,7 @@ export function beadsRouter(gc: GcClient, cityPath: string): Router {
 async function runBeadAction(
   beadId: string,
   action: 'claim' | 'close' | 'nudge',
+  ownerAlias: string,
   reason: string | undefined,
   res: import('express').Response,
 ): Promise<void> {
@@ -367,7 +368,7 @@ async function runBeadAction(
     return;
   }
   try {
-    const result = await execBeadAction(beadId, action, reason);
+    const result = await execBeadAction(beadId, action, ownerAlias, reason);
     void recordAudit({
       type: 'dashboard.exec',
       endpoint: `POST /api/beads/:id/${action}`,
