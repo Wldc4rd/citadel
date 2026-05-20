@@ -30,6 +30,10 @@ const MAX_PAGE_SIZE = 1000;
 // Engineering view (default) issues four type-filtered supervisor
 // queries and merges the result. Each query is bounded to keep total
 // memory + latency predictable even at heavy growth.
+// Stable across rigs — config-promotion not planned. (Distinct from
+// the OWNER_ALIAS pattern which IS config-driven via td-4k317p; this
+// list is hardcoded because the engineering-vs-noise type set is a
+// steady-state product decision, not a per-deploy knob.)
 const ENGINEERING_TYPES: ReadonlyArray<string> = ['feature', 'bug', 'task', 'docs'];
 const ENGINEERING_PER_TYPE_LIMIT = 1000;
 const VALID_SORT_KEYS: ReadonlySet<BeadSortKey> = new Set<BeadSortKey>([
@@ -50,14 +54,31 @@ function parsePositiveInt(raw: unknown, fallback: number, max: number): number {
   return Math.min(n, max);
 }
 
+// Cursor encodes offset today; format is internal. `v: 1` is the
+// version byte — future migration to a stable (sort_key, id) cursor
+// can bump to `v: 2` without breaking deployed clients that hold a
+// `v: 1` value. Drift on concurrent insert is a known limitation —
+// clients observing an item appearing twice (or skipped) across pages
+// should refetch from offset 0. The "stable cursor" migration (per
+// reviewer alternative (b)) is filed as a follow-up; (c) per the
+// reviewer's three-way choice is the chosen shape for cd-d68p.
+const CURSOR_VERSION = 1;
+
 function encodeCursor(offset: number): string {
-  return Buffer.from(JSON.stringify({ o: offset }), 'utf8').toString('base64url');
+  return Buffer.from(JSON.stringify({ v: CURSOR_VERSION, o: offset }), 'utf8').toString('base64url');
 }
 
 function decodeCursor(raw: unknown): number {
   if (typeof raw !== 'string' || raw.length === 0 || raw.length > 256) return 0;
   try {
-    const decoded = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as { o?: unknown };
+    const decoded = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as {
+      v?: unknown;
+      o?: unknown;
+    };
+    // Reject unknown cursor versions. Tolerate v=undefined for any
+    // residual pre-version-byte cursors still in flight from a paused
+    // browser tab (treat as v=1 since that was the only shape).
+    if (decoded.v !== undefined && decoded.v !== CURSOR_VERSION) return 0;
     const offset = decoded?.o;
     if (typeof offset === 'number' && Number.isFinite(offset) && offset >= 0 && offset < 1_000_000) {
       return offset;
@@ -172,6 +193,11 @@ export function beadsRouter(gc: GcClient, cityPath: string): Router {
       const sharedParams = { sort, order, status, label };
       let items: GcBead[];
       let total: number;
+      // Truthy iff any per-type supervisor query in the engineering
+      // fan-out hit ENGINEERING_PER_TYPE_LIMIT. Surface to UI so Charlie
+      // knows a wider view exists (passthrough / showAll=1) when the
+      // current page might be incomplete.
+      let view_capped = false;
 
       if (view === 'passthrough') {
         const upstream = await gc.listBeads(undefined, {
@@ -192,15 +218,25 @@ export function beadsRouter(gc: GcClient, cityPath: string): Router {
             }),
           ),
         );
+        // Engineering view filter: drop items whose labels start with `gc:`
+        // (session/message noise). Mirrors the pre-cd-d68p
+        // defaultBeadFilter — dropping this was a latent regression
+        // even though the live store has 0 such beads today.
         const merged: GcBead[] = [];
-        let upstreamSum = 0;
         for (const r of responses) {
           merged.push(...r.items);
-          upstreamSum += typeof r.total === 'number' ? r.total : r.items.length;
+          if (r.items.length === ENGINEERING_PER_TYPE_LIMIT) view_capped = true;
         }
-        merged.sort((a, b) => compareForSort(a, b, sort, order));
-        total = upstreamSum;
-        items = merged.slice(offset, offset + limit);
+        const filtered = merged.filter((b) =>
+          !(Array.isArray(b.labels) && b.labels.some((l) => l.startsWith('gc:'))),
+        );
+        filtered.sort((a, b) => compareForSort(a, b, sort, order));
+        // total comes from the FILTERED set — pagination would otherwise
+        // "lie" by emitting a non-null next_cursor pointing into an empty
+        // slice when per-type queries were truncated and the upstream sum
+        // exceeded what we actually fetched.
+        total = filtered.length;
+        items = filtered.slice(offset, offset + limit);
       }
 
       const next_cursor = offset + items.length < total ? encodeCursor(offset + limit) : null;
@@ -214,6 +250,7 @@ export function beadsRouter(gc: GcClient, cityPath: string): Router {
         sort,
         order,
         view,
+        view_capped,
       };
       res.json(payload);
     } catch (err) {

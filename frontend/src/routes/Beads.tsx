@@ -319,6 +319,25 @@ export function BeadsPage() {
         </div>
       )}
 
+      {data?.view_capped && (
+        <div className="rounded-md border border-warn-500/40 bg-warn-500/10 px-3 py-1.5 text-xs text-warn-500 flex items-center justify-between gap-3">
+          <span>
+            Engineering view capped at 1000/type — some items may be missing.
+            Toggle <code className="font-sans">show all</code> for the unfiltered view.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setShowAll(true);
+              setCursor(null);
+            }}
+            className="underline decoration-dotted hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warn-500 rounded-sm"
+          >
+            show all
+          </button>
+        </div>
+      )}
+
       {actionResult && (
         <div className="rounded-md border border-ink-600 bg-ink-800 px-3 py-1.5 text-xs text-ink-200">
           {actionResult}
@@ -436,6 +455,11 @@ function Pagination({
 
 // td-nky2js: colour-code label chips by family so Charlie's eye picks out
 // pipeline-state at a glance.
+// Pipeline-state labels (approved/needs-review/needs-impl:*/needs-*) are
+// LOAD-BEARING per the `gc-labels-state-sling-delivery` memory — they
+// drive routing decisions in mayor + refinery. Before changing the
+// colour-grouping below, read that memory; the groupings reflect the
+// state-machine, not arbitrary aesthetics.
 function labelTone(label: string): string {
   if (label === 'approved' || label.endsWith('-approved')) {
     return 'bg-accent-700/30 border-accent-700/40 text-accent-500';
