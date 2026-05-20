@@ -120,9 +120,10 @@ export const api = {
     return request('GET', `/api/beads/${encodeURIComponent(id)}`);
   },
   // cd-5cxk: extended signature — All-mail view + filters + cursor
-  // pagination. The old call shape (box + alias only) still works
-  // because every new field is optional.
-  listMail(params: ListMailParams): Promise<ListMailResponse> {
+  // pagination. cd-wlav: threads optional AbortSignal as second arg
+  // so polling effects can cancel in-flight fetches on the next tick
+  // (senior_developer's stale-overwrite discipline).
+  listMail(params: ListMailParams, signal?: AbortSignal): Promise<ListMailResponse> {
     const qs = new URLSearchParams();
     if (params.box) qs.set('box', params.box);
     if (params.alias) qs.set('alias', params.alias);
@@ -134,7 +135,7 @@ export const api = {
     if (params.cursor) qs.set('cursor', params.cursor);
     if (params.limit) qs.set('limit', String(params.limit));
     const s = qs.toString();
-    return request('GET', `/api/mail${s.length > 0 ? `?${s}` : ''}`);
+    return request('GET', `/api/mail${s.length > 0 ? `?${s}` : ''}`, undefined, signal);
   },
   getThread(threadId: string, alias?: string): Promise<{ items: GcMailItem[] }> {
     // cd-5cxk: alias is now optional; when absent the backend skips the

@@ -212,32 +212,74 @@ export function AgentDetailPage() {
     return session.alias ?? session.session_name ?? session.id ?? null;
   }, [session]);
 
+  // Wide fetch — box='all' returns the supervisor's mail window
+  // unfiltered by alias (the alias arg is ignored when box='all' per
+  // backend/src/routes/mail.ts::filterByBox). Filtering happens
+  // locally in chatThread useMemo below. Discoverable user behavior:
+  // shows recent messages in this thread; for archive search use
+  // /mail (wider 1000-mail window + filter UI).
+  //
+  // refreshChat is kept as a useCallback for the handleChatSend
+  // post-send path (no AbortSignal there — one-shot user-initiated).
+  // The polling effect below owns its own AbortController + cancelled
+  // flag for stale-overwrite protection.
   const refreshChat = useCallback(async () => {
     if (!agentChatAlias) return;
-    setChatError(null);
     try {
-      // Wide fetch — box='all' returns the supervisor's mail window
-      // unfiltered by alias (the alias arg is ignored when box='all'
-      // per backend/src/routes/mail.ts::filterByBox). Filtering
-      // happens locally in chatThread useMemo below.
-      const result = await api.listMail('all', viewingAs.ownerAlias);
-      // listMail returns the existing shape {items, total?, upstream_total?};
-      // store the raw items + let chatThread useMemo do the work.
+      // cd-5cxk param-object signature; box='all' makes the alias arg
+      // a no-op upstream (filterByBox short-circuits) so passing only
+      // box keeps the URL minimal. Local chatThread useMemo applies
+      // the actual participant filter.
+      const result = await api.listMail({ box: 'all' });
       setChatMessages(result.items);
       setChatFetchedAt(Date.now());
+      setChatError(null);
     } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError') return;
       setChatError(err instanceof Error ? err.message : 'chat fetch failed');
     }
-  }, [agentChatAlias, viewingAs.ownerAlias]);
+  }, [agentChatAlias]);
 
+  // senior_developer's rule applied here: ANY POLLING LOOP MUST GUARD
+  // AGAINST STALE-RESULT OVERWRITE. Each tick aborts the previous in-
+  // flight fetch before issuing the next; cleanup aborts + clears
+  // interval + flips cancelled. Without this, a slow /mail response
+  // could outlast CHAT_REFRESH_MS and clobber a newer one — visible
+  // as chat-order flicker mid-conversation. Same pattern as cd-uebi's
+  // mayor peek poll (review-required fix); ported here because the
+  // chat surface has the highest emotional cost for stale-overwrite
+  // of any polling surface in the dashboard.
   useEffect(() => {
     if (!agentChatAlias) return;
-    void refreshChat();
-    const tick = setInterval(() => {
-      if (!document.hidden) void refreshChat();
-    }, CHAT_REFRESH_MS);
-    return () => clearInterval(tick);
-  }, [agentChatAlias, refreshChat]);
+    let cancelled = false;
+    let controller = new AbortController();
+
+    const tick = async () => {
+      if (document.hidden) return;
+      controller.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      try {
+        const result = await api.listMail({ box: 'all' }, signal);
+        if (cancelled) return;
+        setChatMessages(result.items);
+        setChatFetchedAt(Date.now());
+        setChatError(null);
+      } catch (err) {
+        if (cancelled) return;
+        if ((err as { name?: string })?.name === 'AbortError') return;
+        setChatError(err instanceof Error ? err.message : 'chat fetch failed');
+      }
+    };
+
+    void tick();
+    const interval = setInterval(() => void tick(), CHAT_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearInterval(interval);
+    };
+  }, [agentChatAlias]);
 
   // cd-wlav: filter the wide-fetch mail to messages BETWEEN the
   // dashboard owner and this specific agent. Owner side includes the
