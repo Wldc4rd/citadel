@@ -149,6 +149,46 @@ export interface BeadFilterParams {
   showAll?: boolean;
 }
 
+// ── Server-side beads list query (cd-d68p) ───────────────────────────────
+//
+// At 2000+ beads, pulling all then sorting/filtering in the browser drops
+// items outside the fetch window. The /api/beads endpoint accepts these
+// params so the WHERE/ORDER BY/LIMIT happens at the source. Cursor is an
+// opaque token the server controls — clients pass it back unchanged for
+// forward/backward navigation.
+
+export type BeadSortKey = 'id' | 'priority' | 'created_at' | 'updated_at' | 'status';
+export type BeadSortOrder = 'asc' | 'desc';
+
+export interface ListBeadsParams {
+  sort?: BeadSortKey;
+  order?: BeadSortOrder;
+  label?: string;
+  status?: 'open' | 'in_progress' | 'blocked' | 'closed';
+  type?: string;
+  cursor?: string;
+  limit?: number;
+  showAll?: boolean;
+}
+
+export interface ListBeadsResponse {
+  items: GcBead[];
+  /**
+   * Best-effort total count matching the filters. For the default
+   * engineering view this is the SUM of the four type-filtered totals
+   * (feature+bug+task+docs); for a passthrough query this is the
+   * supervisor's own total.
+   */
+  total: number;
+  next_cursor: string | null;
+  prev_cursor: string | null;
+  page_size: number;
+  sort: BeadSortKey;
+  order: BeadSortOrder;
+  /** Which materialisation path served this response. */
+  view: 'engineering' | 'passthrough';
+}
+
 export type BeadAction = 'claim' | 'close' | 'nudge';
 
 export interface BeadActionRequest {

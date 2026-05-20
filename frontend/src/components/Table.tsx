@@ -32,6 +32,15 @@ interface TableProps<T> {
    * omit) to use the row order as returned by the source.
    */
   initialSort?: SortState | null;
+  /**
+   * Controlled mode (cd-d68p): when both are supplied, Table renders rows
+   * in the order it received them (no client-side resort) and delegates
+   * sort-toggle clicks to the parent via onSortChange. Use this when the
+   * source is already sorted server-side and re-sorting client-side
+   * would mis-order page boundaries.
+   */
+  sort?: SortState | null;
+  onSortChange?: (next: SortState) => void;
 }
 
 // Lightweight typed table. Sortable via header click, no external dep.
@@ -44,10 +53,16 @@ export function Table<T>({
   onRowClick,
   empty,
   initialSort,
+  sort: controlledSort,
+  onSortChange,
 }: TableProps<T>) {
-  const [sort, setSort] = useState<SortState | null>(initialSort ?? null);
+  const isControlled = controlledSort !== undefined && onSortChange !== undefined;
+  const [uncontrolledSort, setUncontrolledSort] = useState<SortState | null>(initialSort ?? null);
+  const sort = isControlled ? controlledSort : uncontrolledSort;
 
   const sortedRows = useMemo(() => {
+    // Controlled mode trusts the parent: rows are pre-sorted server-side.
+    if (isControlled) return rows;
     if (sort === null) return rows;
     const col = columns.find((c) => c.key === sort.key);
     if (!col || !col.sortable) return rows;
@@ -63,13 +78,17 @@ export function Table<T>({
       if (av > bv) return dir;
       return 0;
     });
-  }, [rows, columns, sort]);
+  }, [rows, columns, sort, isControlled]);
 
   const toggleSort = (key: string) => {
-    setSort((cur) => {
-      if (cur?.key !== key) return { key, dir: 'asc' };
-      return { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' };
-    });
+    const cur = sort;
+    const next: SortState =
+      cur?.key === key ? { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' };
+    if (isControlled) {
+      onSortChange(next);
+    } else {
+      setUncontrolledSort(next);
+    }
   };
 
   return (

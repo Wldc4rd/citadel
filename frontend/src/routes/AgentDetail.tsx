@@ -63,7 +63,7 @@ export function AgentDetailPage() {
 
   const refreshBeads = useCallback(async () => {
     try {
-      const { items } = await api.listBeads(true);
+      const { items } = await api.listBeads({ showAll: true, limit: 1000 });
       setBeads(items);
     } catch {
       /* don't blow away the page; surfaced via the per-panel area */
