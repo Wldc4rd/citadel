@@ -11,6 +11,7 @@ import type { GcClient } from '../gc-client.js';
 import { execBdShow, execBeadAction, ExecError } from '../exec.js';
 import { renderMarkdownSafe } from '../markdown.js';
 import { recordAudit } from '../audit.js';
+import { decodeCursor, encodeCursor } from '../cursor.js';
 
 // Must mirror BEAD_ID_RE in exec.ts so claim/close/nudge (write) and
 // the drill-in /:id (read) accept the same prefix set: td/th/jt/cd/thriva.
@@ -52,41 +53,6 @@ function parsePositiveInt(raw: unknown, fallback: number, max: number): number {
   const n = Number.parseInt(raw, 10);
   if (!Number.isFinite(n) || n < 1) return fallback;
   return Math.min(n, max);
-}
-
-// Cursor encodes offset today; format is internal. `v: 1` is the
-// version byte — future migration to a stable (sort_key, id) cursor
-// can bump to `v: 2` without breaking deployed clients that hold a
-// `v: 1` value. Drift on concurrent insert is a known limitation —
-// clients observing an item appearing twice (or skipped) across pages
-// should refetch from offset 0. The "stable cursor" migration (per
-// reviewer alternative (b)) is filed as a follow-up; (c) per the
-// reviewer's three-way choice is the chosen shape for cd-d68p.
-const CURSOR_VERSION = 1;
-
-function encodeCursor(offset: number): string {
-  return Buffer.from(JSON.stringify({ v: CURSOR_VERSION, o: offset }), 'utf8').toString('base64url');
-}
-
-function decodeCursor(raw: unknown): number {
-  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 256) return 0;
-  try {
-    const decoded = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as {
-      v?: unknown;
-      o?: unknown;
-    };
-    // Reject unknown cursor versions. Tolerate v=undefined for any
-    // residual pre-version-byte cursors still in flight from a paused
-    // browser tab (treat as v=1 since that was the only shape).
-    if (decoded.v !== undefined && decoded.v !== CURSOR_VERSION) return 0;
-    const offset = decoded?.o;
-    if (typeof offset === 'number' && Number.isFinite(offset) && offset >= 0 && offset < 1_000_000) {
-      return offset;
-    }
-  } catch {
-    /* falls through to 0 — invalid cursors are treated as start-of-list */
-  }
-  return 0;
 }
 
 interface ParsedQuery {

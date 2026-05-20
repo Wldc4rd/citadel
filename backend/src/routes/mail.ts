@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { GcMailItem, ListMailResponse, MailBox } from 'citadel-shared';
 import type { GcClient } from '../gc-client.js';
 import { recordAudit } from '../audit.js';
+import { decodeCursor, encodeCursor } from '../cursor.js';
 
 // READ-only mail router. The architect (security_researcher td-wisp-eb0pn)
 // requires PHYSICAL SEPARATION from the send path — see ./mail-send.ts.
@@ -35,34 +36,6 @@ function parsePositiveInt(raw: unknown, fallback: number, max: number): number {
   const n = Number.parseInt(raw, 10);
   if (!Number.isFinite(n) || n < 1) return fallback;
   return Math.min(n, max);
-}
-
-// cd-5cxk: cursor encodes offset only — same shape + v:1 version byte
-// as the cd-d68p beads cursor. Drift on concurrent insert is a known
-// limitation; clients that observe duplicate or skipped items across
-// pages should refetch from offset 0. Future migration to a stable
-// (sort_key, id) cursor bumps to v:2 without breaking deployed clients
-// that hold a v:1 value.
-const CURSOR_VERSION = 1;
-function encodeCursor(offset: number): string {
-  return Buffer.from(JSON.stringify({ v: CURSOR_VERSION, o: offset }), 'utf8').toString('base64url');
-}
-function decodeCursor(raw: unknown): number {
-  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 256) return 0;
-  try {
-    const decoded = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as {
-      v?: unknown;
-      o?: unknown;
-    };
-    if (decoded.v !== undefined && decoded.v !== CURSOR_VERSION) return 0;
-    const offset = decoded?.o;
-    if (typeof offset === 'number' && Number.isFinite(offset) && offset >= 0 && offset < 1_000_000) {
-      return offset;
-    }
-  } catch {
-    /* falls through to 0 — invalid cursors are treated as start-of-list */
-  }
-  return 0;
 }
 
 interface ParsedListQuery {
