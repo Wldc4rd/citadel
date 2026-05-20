@@ -17,7 +17,14 @@ export function loadAppConfig(): Promise<AppConfig> {
   if (cached) return Promise.resolve(cached);
   if (inFlight) return inFlight;
   inFlight = fetch('/api/config/gc-supervisor', { credentials: 'same-origin' })
-    .then((r) => r.json())
+    .then((r) => {
+      // Fail loud — a 4xx/5xx body shaped like {error:'…'} would otherwise
+      // coerce undefined fields into the cached AppConfig via String(undefined)
+      // ('undefined' literal), and that wrong value persists for the page
+      // lifetime. Consumers (useAppConfig) can surface the error state instead.
+      if (!r.ok) throw new Error(`appConfig fetch failed: ${r.status}`);
+      return r.json();
+    })
     .then((j) => {
       const cfg: AppConfig = {
         supervisorUrl: String(j.supervisor_url),

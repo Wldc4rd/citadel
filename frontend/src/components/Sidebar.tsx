@@ -60,7 +60,7 @@ export function Sidebar() {
         ))}
       </ul>
       <div className="px-2 pt-3 mt-3 border-t border-ink-700 text-[10px] text-ink-300">
-        {typeof window === 'undefined' ? cityLabel : window.location.host}
+        {window.location.host}
       </div>
     </nav>
   );
