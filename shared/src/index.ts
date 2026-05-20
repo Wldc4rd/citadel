@@ -187,6 +187,14 @@ export interface ListBeadsResponse {
   order: BeadSortOrder;
   /** Which materialisation path served this response. */
   view: 'engineering' | 'passthrough';
+  /**
+   * True iff this is an engineering view AND any per-type supervisor
+   * query in the fan-out hit ENGINEERING_PER_TYPE_LIMIT (1000). Items
+   * may be missing from the view; clients should surface this to the
+   * user and offer the passthrough / showAll path as an escape hatch.
+   * Always false for passthrough (supervisor's total is authoritative).
+   */
+  view_capped: boolean;
 }
 
 export type BeadAction = 'claim' | 'close' | 'nudge';
