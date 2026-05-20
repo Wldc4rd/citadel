@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { loadAppConfig } from '../api/appConfig';
 
 // Direct EventSource against gc supervisor's /v0/city/{name}/events/stream.
 // Architect addendum td-wisp-ijk7g + mechanic td-wisp-e1v14: gc supervisor
@@ -10,32 +11,6 @@ import { useEffect, useRef, useState } from 'react';
 // middleware). The browser opens the stream directly.
 
 export type GcEventConnState = 'connecting' | 'open' | 'closed';
-
-interface GcEventConfig {
-  /** URL is fetched once from /api/config/gc-supervisor; cached after. */
-  supervisorUrl: string;
-  city: string;
-}
-
-let cachedConfig: GcEventConfig | null = null;
-let configPromise: Promise<GcEventConfig> | null = null;
-
-async function loadConfig(): Promise<GcEventConfig> {
-  if (cachedConfig) return cachedConfig;
-  if (!configPromise) {
-    configPromise = fetch('/api/config/gc-supervisor', { credentials: 'same-origin' })
-      .then((r) => r.json())
-      .then((j) => {
-        const cfg: GcEventConfig = {
-          supervisorUrl: String(j.supervisor_url),
-          city: String(j.city),
-        };
-        cachedConfig = cfg;
-        return cfg;
-      });
-  }
-  return configPromise;
-}
 
 /**
  * Subscribe to gc events. When an event whose type starts with any of
@@ -61,7 +36,7 @@ export function useGcEventRefresh(
 
     const connect = async () => {
       try {
-        const cfg = await loadConfig();
+        const cfg = await loadAppConfig();
         if (cancelled) return;
         // The supervisor's stream path lives under /v0/city/{name}/events/stream.
         const u = new URL(
