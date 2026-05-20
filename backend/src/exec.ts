@@ -435,6 +435,7 @@ export async function execBdListClosed(
         `--closed-after=${closedAfter}`,
         '--exclude-label=order-tracking',
         '--exclude-type=session,message,convoy',
+        '--sort=closed',
         `--limit=${limit}`,
         '--json',
       ],
