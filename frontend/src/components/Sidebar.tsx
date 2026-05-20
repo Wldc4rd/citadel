@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { useViewingAs } from '../contexts/ViewingAsContext';
+import { useAppConfig } from '../api/appConfig';
 
 interface NavItem {
   to: string;
@@ -21,10 +22,12 @@ const NAV: NavItem[] = [
 
 export function Sidebar() {
   const { viewingAs } = useViewingAs();
+  const cfg = useAppConfig();
+  const cityLabel = cfg?.city ?? '…';
   return (
     <nav className="w-56 shrink-0 border-r border-ink-700 bg-ink-800 px-3 py-4 flex flex-col">
       <div className="px-2 mb-4">
-        <p className="text-xs uppercase tracking-widest text-ink-300">thriva-dev</p>
+        <p className="text-xs uppercase tracking-widest text-ink-300">{cityLabel}</p>
         <p className="font-sans text-sm font-semibold text-ink-100">admin</p>
       </div>
       {!viewingAs.isCharlie && (
@@ -57,7 +60,7 @@ export function Sidebar() {
         ))}
       </ul>
       <div className="px-2 pt-3 mt-3 border-t border-ink-700 text-[10px] text-ink-300">
-        localhost:8081 · charlie
+        {typeof window === 'undefined' ? cityLabel : window.location.host}
       </div>
     </nav>
   );

@@ -127,7 +127,7 @@ export function MailPage() {
           <div>
             <h1 className="text-lg font-sans font-semibold text-ink-100">Mail</h1>
             <p className="text-xs text-ink-300">
-              Read any agent's inbox. Sends always go out as Charlie.
+              Read any agent's inbox. Sends always go out as the dashboard owner.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -139,8 +139,8 @@ export function MailPage() {
               disabled={!viewingAs.isCharlie}
               title={
                 viewingAs.isCharlie
-                  ? 'Compose a new message (sends as Charlie)'
-                  : 'Switch back to Charlie to compose'
+                  ? 'Compose a new message'
+                  : 'Switch back to your default identity to compose'
               }
             >
               Compose
@@ -255,12 +255,12 @@ function IdentitySwitcher({
           onClick={onReset}
           className="underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warn-500 rounded-sm"
         >
-          back to charlie
+          back to default
         </button>
       )}
       {!isCharlie && (
         <span className="ml-auto text-[11px] italic">
-          read-only · sends are always from charlie
+          read-only · sends always from owner
         </span>
       )}
     </div>
@@ -369,7 +369,7 @@ function ComposeModal({
       open={open}
       onClose={onClose}
       title="New message"
-      caption="Sends as charlie — viewing-as has no effect on the sender"
+      caption="Sends as the dashboard owner — viewing-as has no effect on the sender"
       widthClass="max-w-2xl"
       footer={
         <>
@@ -377,7 +377,7 @@ function ComposeModal({
             Cancel
           </Button>
           <Button tone="accent" size="sm" disabled={!canSend} onClick={() => void onSend()}>
-            {sending ? 'Sending…' : 'Send as charlie'}
+            {sending ? 'Sending…' : 'Send'}
           </Button>
         </>
       }
@@ -387,7 +387,7 @@ function ComposeModal({
           From
           <input
             type="text"
-            value={viewingAs.isCharlie ? 'charlie' : 'charlie (viewing-as does not change sender)'}
+            value={viewingAs.isCharlie ? 'the dashboard owner' : 'the dashboard owner (viewing-as does not change sender)'}
             disabled
             className="mt-1 w-full bg-ink-900 border border-ink-700 rounded-md px-2 py-1.5 text-sm font-sans text-ink-300 italic"
           />
@@ -425,7 +425,7 @@ function ComposeModal({
         </label>
         {!viewingAs.isCharlie && (
           <p className="text-xs text-warn-500 bg-warn-500/10 border border-warn-500/30 rounded-md px-2 py-1">
-            You're viewing-as <code className="font-sans">{viewingAs.alias}</code>. Switch back to Charlie to compose; sends from this modal are structurally locked to Charlie regardless.
+            You're viewing-as <code className="font-sans">{viewingAs.alias}</code>. Switch back to your default identity to compose; sends from this modal are structurally locked to the dashboard owner regardless.
           </p>
         )}
         {error && (

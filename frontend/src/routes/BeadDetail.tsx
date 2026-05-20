@@ -122,7 +122,7 @@ export function BeadDetailPage() {
     setActionFeedback(null);
     try {
       await api.claimBead(detail.bead.id);
-      setActionFeedback('Claimed as charlie (refresh in progress).');
+      setActionFeedback('Claimed (refresh in progress).');
       void refresh();
     } catch (err) {
       setActionFeedback(`Claim failed: ${err instanceof Error ? err.message : 'unknown'}`);
@@ -210,7 +210,7 @@ export function BeadDetailPage() {
           {b.status !== 'closed' && (
             <>
               <Button size="sm" onClick={handleClaim} disabled={actionRunning !== null}>
-                {actionRunning === 'claim' ? 'Claiming…' : 'Claim as charlie'}
+                {actionRunning === 'claim' ? 'Claiming…' : 'Claim'}
               </Button>
               <Button
                 size="sm"
