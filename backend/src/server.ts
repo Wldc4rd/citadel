@@ -12,6 +12,7 @@ import {
 import { csrfIssueCookie, csrfValidate, getCsrfToken } from './middleware/csrf.js';
 import { GcClient } from './gc-client.js';
 import { sessionsRouter } from './routes/sessions.js';
+import { agentsRouter } from './routes/agents.js';
 import { beadsRouter } from './routes/beads.js';
 import { mailRouter } from './routes/mail.js';
 import { mailSendRouter } from './routes/mail-send.js';
@@ -75,6 +76,9 @@ function main(): void {
   const writeRouter = express.Router();
   writeRouter.use(csrfValidate);
   writeRouter.use('/sessions', sessionsRouter(gc));
+  // cd-i81q: agents router — currently exposes GET /:alias/prime
+  // (composed behavioural prompt). Read-only; edit-and-save deferred.
+  writeRouter.use('/agents', agentsRouter(config.cityPath));
   writeRouter.use('/beads', beadsRouter(gc, config.cityPath, config.cityOwnerAlias));
   writeRouter.use('/mail', mailRouter(gc, config.cityOwnerAlias));
   // mail-send is a SEPARATE router mounted at its own path. The handler in

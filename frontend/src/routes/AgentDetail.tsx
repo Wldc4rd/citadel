@@ -307,7 +307,104 @@ export function AgentDetailPage() {
           <SessionPeekContent loading={peekLoading && peekResult === null} error={peekError} result={peekResult} />
         </div>
       </div>
+
+      <DirectivesPanel agentAlias={session.alias ?? session.template ?? null} />
     </section>
+  );
+}
+
+// cd-i81q: composed behavioural prompt for the agent. Read-only —
+// the bead's edit-and-save stretch goal is deferred behind security_
+// researcher review (direct prompt edit via UI is a high-blast-radius
+// action). Filed-for-followup with the same scope notes from the bead.
+//
+// Lazy: fetched on first render of the panel; cached for the page's
+// lifetime (the prompt rarely changes during a session). Manual
+// Refresh button re-fetches.
+function DirectivesPanel({ agentAlias }: { agentAlias: string | null }) {
+  const [prompt, setPrompt] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notConfigured, setNotConfigured] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if (!agentAlias) return;
+    setLoading(true);
+    setError(null);
+    setNotConfigured(false);
+    try {
+      const result = await api.agentPrime(agentAlias);
+      setPrompt(result.prompt);
+    } catch (err) {
+      if (err instanceof ApiClientError && err.status === 404) {
+        setNotConfigured(true);
+        setPrompt(null);
+      } else {
+        const msg =
+          err instanceof ApiClientError
+            ? `${err.status} ${err.message}`
+            : err instanceof Error
+              ? err.message
+              : 'prime failed';
+        setError(msg);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [agentAlias]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  if (!agentAlias) return null;
+
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <span className="text-xs uppercase tracking-wider text-ink-300">
+          Directives · <code className="font-sans">gc prime {agentAlias}</code>
+        </span>
+        <div className="flex items-center gap-2">
+          {prompt && (
+            <span className="text-[11px] text-ink-300 tabular-nums">
+              {prompt.length.toLocaleString()} chars
+            </span>
+          )}
+          <Button size="sm" tone="ghost" onClick={() => void refresh()} disabled={loading}>
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </Button>
+        </div>
+      </div>
+      <div className="panel-body space-y-2">
+        <p className="text-[11px] text-ink-300">
+          The composed behavioural prompt the agent reads on next wake — built
+          from the agent's <code className="font-sans">prompt_template</code> +
+          city config patches. Read-only; edit-and-save deferred behind a
+          security review (see cd-i81q follow-up).
+        </p>
+        {loading && prompt === null && (
+          <p className="text-xs text-ink-300 italic">Loading directives…</p>
+        )}
+        {notConfigured && (
+          <div className="rounded-md border border-warn-500/40 bg-warn-500/10 px-3 py-2 text-xs text-warn-500">
+            Agent <code className="font-sans">{agentAlias}</code> has no entry in city.toml.
+            <code className="font-sans"> gc prime --strict</code> reports it as not configured;
+            the runtime would fall back to a generic worker prompt.
+          </div>
+        )}
+        {error && !notConfigured && (
+          <div className="rounded-md border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-500">
+            Error: {error}
+          </div>
+        )}
+        {prompt !== null && (
+          <pre className="text-[11px] font-body text-ink-100 bg-ink-900/50 border border-ink-700 rounded-md px-3 py-2 whitespace-pre-wrap leading-snug max-h-[60vh] overflow-y-auto">
+            {prompt}
+          </pre>
+        )}
+      </div>
+    </div>
   );
 }
 

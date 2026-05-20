@@ -544,4 +544,41 @@ export async function execSessionNudge(
   }
 }
 
+/**
+ * `gc prime --strict <agent>` — outputs the composed behavioural prompt
+ * for an agent (the same text the agent reads on wake). cd-i81q read-
+ * only surface: the dashboard surfaces the resolved prompt without
+ * exposing an edit path (edits would need a file-write privilege the
+ * exec whitelist deliberately doesn't grant — filed-for-followup with
+ * security_researcher).
+ *
+ * --strict so 'agent not in city config' surfaces as exit=1 +
+ * stderr (caller renders "not configured") instead of gc's default
+ * fallback to a generic worker prompt that would mislead the operator.
+ *
+ * Output size: measured ~15KB for the mayor's prompt; well under
+ * runExec's 100KB MAX_BYTES.
+ */
+export async function execAgentPrime(
+  agentName: string,
+  cityPath: string,
+): Promise<ExecResult> {
+  if (!cityPath.startsWith('/') || cityPath.includes('..')) {
+    throw new ExecError('invalid city path', 'validation');
+  }
+  if (!AGENT_ALIAS_RE.test(agentName)) {
+    throw new ExecError('invalid agent name', 'validation');
+  }
+  await acquireSlot();
+  try {
+    return await runExec(
+      'gc',
+      ['prime', '--strict', `--city=${cityPath}`, agentName],
+      10_000,
+    );
+  } finally {
+    releaseSlot();
+  }
+}
+
 export { sanitiseTerminalOutput };
