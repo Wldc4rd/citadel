@@ -1,20 +1,39 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { GcBead } from 'citadel-shared';
+import type { BeadSortKey, BeadSortOrder, GcBead, ListBeadsResponse } from 'citadel-shared';
 import { api, ApiClientError } from '../api/client';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
-import { Table, type TableColumn } from '../components/Table';
+import { Table, type TableColumn, type SortState } from '../components/Table';
 import { useGcEventRefresh } from '../hooks/useGcEvents';
 
+// cd-d68p: sort + filter + pagination are now server-side. Cursor is an
+// opaque token from the backend; prev/next come back in the response and
+// we just hand them back unchanged on the next click. Sort lives in
+// component state and round-trips to the API on every header click.
+
+const SORT_COL_TO_KEY: Record<string, BeadSortKey> = {
+  id: 'id',
+  priority: 'priority',
+  status: 'status',
+  updated: 'updated_at',
+};
+
+const KEY_TO_SORT_COL: Record<BeadSortKey, string> = {
+  id: 'id',
+  priority: 'priority',
+  status: 'status',
+  updated_at: 'updated',
+  created_at: 'updated', // share the "time" column header for either time key
+};
+
 export function BeadsPage() {
-  const [rows, setRows] = useState<GcBead[]>([]);
-  const [showing, setShowing] = useState(0);
-  const [upstreamTotal, setUpstreamTotal] = useState<number | undefined>(undefined);
-  const [upstreamFetched, setUpstreamFetched] = useState<number | undefined>(undefined);
-  const [fetchLimit, setFetchLimit] = useState<number | undefined>(undefined);
+  const [data, setData] = useState<ListBeadsResponse | null>(null);
+  const [sort, setSort] = useState<BeadSortKey>('updated_at');
+  const [order, setOrder] = useState<BeadSortOrder>('desc');
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,32 +46,28 @@ export function BeadsPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.listBeads(showAll);
-      setRows(data.items);
-      setShowing(data.total);
-      setUpstreamTotal(data.upstream_total);
-      setUpstreamFetched(data.upstream_fetched);
-      setFetchLimit(data.fetch_limit);
+      const result = await api.listBeads({
+        sort,
+        order,
+        label: labelFilter ?? undefined,
+        showAll,
+        cursor: cursor ?? undefined,
+      });
+      setData(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'failed to load');
     } finally {
       setLoading(false);
     }
-  }, [showAll]);
-
-  // td-nky2js: label filter — click a chip on a row, only show rows that
-  // carry that label. Click again (or "clear") to drop it. Filter applies
-  // client-side over the data the backend already returned.
-  const filteredRows = useMemo(() => {
-    if (labelFilter === null) return rows;
-    return rows.filter((r) => Array.isArray(r.labels) && r.labels.includes(labelFilter));
-  }, [rows, labelFilter]);
+  }, [sort, order, labelFilter, showAll, cursor]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  // Phase C: live updates when supervisor emits bead.*
+  // Phase C: live updates when supervisor emits bead.* — re-fetch the
+  // current page. We don't reset the cursor; a state change on a row in
+  // the current page should refresh in place without scrolling the user.
   useGcEventRefresh(['bead.'], () => void refresh());
 
   const runAction = useCallback(
@@ -84,12 +99,29 @@ export function BeadsPage() {
     [refresh],
   );
 
+  const handleSortChange = useCallback((next: SortState) => {
+    const key = SORT_COL_TO_KEY[next.key];
+    if (!key) return;
+    setSort(key);
+    setOrder(next.dir);
+    setCursor(null); // sort change resets to first page; cursor offsets are sort-dependent
+  }, []);
+
+  const handleLabelChipClick = useCallback((label: string) => {
+    setLabelFilter((cur) => (cur === label ? null : label));
+    setCursor(null);
+  }, []);
+
+  const tableSort = useMemo<SortState>(() => ({
+    key: KEY_TO_SORT_COL[sort],
+    dir: order,
+  }), [sort, order]);
+
   const columns = useMemo<ReadonlyArray<TableColumn<GcBead>>>(() => [
     {
       key: 'id',
       label: 'ID',
       sortable: true,
-      sortValue: (r) => r.id,
       render: (r) => (
         <Link
           to={`/beads/${encodeURIComponent(r.id)}`}
@@ -104,8 +136,9 @@ export function BeadsPage() {
     {
       key: 'title',
       label: 'Title',
-      sortable: true,
-      sortValue: (r) => r.title,
+      // Title isn't sortable server-side in this PR — supervisor only
+      // accepts id/priority/created_at/updated_at/status. Drop the
+      // sortable affordance so users don't get a no-op control.
       render: (r) => (
         <div className="min-w-0">
           <Link
@@ -118,10 +151,6 @@ export function BeadsPage() {
           <p className="text-[11px] text-ink-300">
             {r.issue_type}{r.assignee ? ` · ${r.assignee}` : ''}
           </p>
-          {/* td-nky2js: inline label chips, colour-coded by family. Click
-              a chip to filter the table to that label. Memory
-              "gc-labels-state-sling-delivery" — pipeline state is label-
-              driven, so labels need at-a-glance visibility. */}
           {Array.isArray(r.labels) && r.labels.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
               {r.labels.slice(0, 8).map((l) => (
@@ -130,7 +159,7 @@ export function BeadsPage() {
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setLabelFilter((cur) => (cur === l ? null : l));
+                    handleLabelChipClick(l);
                   }}
                   className={`text-[10px] px-1.5 py-0.5 rounded border ${labelTone(l)} hover:brightness-125 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500`}
                   title={`Filter to label "${l}"`}
@@ -152,7 +181,6 @@ export function BeadsPage() {
       key: 'priority',
       label: 'P',
       sortable: true,
-      sortValue: (r) => r.priority,
       render: (r) => (
         <span
           className={`text-xs tabular-nums font-medium ${
@@ -173,7 +201,6 @@ export function BeadsPage() {
       key: 'status',
       label: 'Status',
       sortable: true,
-      sortValue: (r) => r.status,
       render: (r) => <StatusPill status={r.status} />,
       className: 'w-28',
     },
@@ -181,7 +208,6 @@ export function BeadsPage() {
       key: 'updated',
       label: 'Updated',
       sortable: true,
-      sortValue: (r) => r.updated_at ?? r.created_at,
       render: (r) => (
         <span className="text-xs text-ink-200 tabular-nums">
           {formatDate(r.updated_at ?? r.created_at)}
@@ -227,20 +253,16 @@ export function BeadsPage() {
       align: 'right',
       className: 'w-44',
     },
-  ], [actionInFlight, runAction]);
+  ], [actionInFlight, runAction, handleLabelChipClick]);
 
-  // td-7t24i6: surface the fetch-window truncation so Charlie sees when
-  // the dashboard is potentially undercounting. With fetch_limit=1000 and
-  // the city's ~2139 total, the engineering working set fits comfortably
-  // (~183 eng-only), but a future growth could push past the window —
-  // this pill shows when that happens.
-  const isTruncated =
-    typeof upstreamTotal === 'number' &&
-    typeof upstreamFetched === 'number' &&
-    upstreamFetched < upstreamTotal;
-  const truncationMessage = isTruncated
-    ? `fetch window covered ${upstreamFetched} of ${upstreamTotal} store beads — raise limit if engineering work past the window`
-    : null;
+  const items = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const pageSize = data?.page_size ?? 50;
+  const view = data?.view ?? 'engineering';
+  // Best-effort range estimate. We don't echo back the offset itself —
+  // derive it from the cursor + items. The end of the page is offset +
+  // items.length; start is end - items.length + 1.
+  // To avoid coupling to cursor encoding, just show "N of total" + page hints.
 
   return (
     <section className="space-y-3">
@@ -250,16 +272,13 @@ export function BeadsPage() {
           <p className="text-xs text-ink-300">
             Engineering work in <code className="font-sans">gc bd</code>
             {' · '}
-            <span className="text-ink-200">{filteredRows.length}</span>
-            {labelFilter !== null ? (
-              <> matching <code className="text-accent-500">{labelFilter}</code></>
-            ) : (
-              <> of {showing} engineering bead{showing === 1 ? '' : 's'}</>
+            <span className="text-ink-200">
+              {items.length} of {total} {view === 'engineering' ? 'engineering' : 'matching'} bead{total === 1 ? '' : 's'}
+            </span>
+            {labelFilter !== null && (
+              <> · label <code className="text-accent-500">{labelFilter}</code></>
             )}
-            {typeof upstreamTotal === 'number' && (
-              <> · fetched {upstreamFetched ?? '?'} of {upstreamTotal} store beads (limit {fetchLimit ?? '?'})</>
-            )}
-            {' · v0 filter hides session/message noise.'}
+            {showAll && <> · <span className="text-warn-500">showing all (incl. session/message noise)</span></>}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -268,7 +287,10 @@ export function BeadsPage() {
             <input
               type="checkbox"
               checked={showAll}
-              onChange={(e) => setShowAll(e.target.checked)}
+              onChange={(e) => {
+                setShowAll(e.target.checked);
+                setCursor(null);
+              }}
               className="accent-accent-700"
             />
             show all
@@ -279,20 +301,17 @@ export function BeadsPage() {
         </div>
       </header>
 
-      {truncationMessage && (
-        <div className="rounded-md border border-warn-500/40 bg-warn-500/10 px-3 py-1.5 text-xs text-warn-500">
-          ⚠ {truncationMessage}
-        </div>
-      )}
-
       {labelFilter !== null && (
         <div className="rounded-md border border-accent-700/40 bg-accent-700/10 px-3 py-1.5 text-xs text-accent-500 flex items-center justify-between gap-3">
           <span>
-            Filtering by label <code className="font-sans text-ink-100">{labelFilter}</code>
+            Filtering by label <code className="font-sans text-ink-100">{labelFilter}</code> · {total} total
           </span>
           <button
             type="button"
-            onClick={() => setLabelFilter(null)}
+            onClick={() => {
+              setLabelFilter(null);
+              setCursor(null);
+            }}
             className="underline decoration-dotted hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 rounded-sm"
           >
             clear
@@ -307,21 +326,28 @@ export function BeadsPage() {
       )}
 
       <div className="panel">
-        {/* td-liky3d: default newest-first by updated_at — most recently
-            touched beads at the top. The user can re-sort by any sortable
-            column (priority, status, id, title) by clicking the header. */}
         <Table
           columns={columns}
-          rows={filteredRows}
+          rows={items}
           rowKey={(r) => r.id}
+          sort={tableSort}
+          onSortChange={handleSortChange}
           empty={
             labelFilter !== null
-              ? `No beads on this page match label "${labelFilter}"`
+              ? `No beads match label "${labelFilter}"`
               : 'Nothing on the queue right now'
           }
-          initialSort={{ key: 'updated', dir: 'desc' }}
         />
       </div>
+
+      <Pagination
+        prevCursor={data?.prev_cursor ?? null}
+        nextCursor={data?.next_cursor ?? null}
+        onPage={(c) => setCursor(c)}
+        pageSize={pageSize}
+        total={total}
+        disabled={loading}
+      />
 
       <Modal
         open={closing !== null}
@@ -365,10 +391,52 @@ export function BeadsPage() {
   );
 }
 
+function Pagination({
+  prevCursor,
+  nextCursor,
+  onPage,
+  pageSize,
+  total,
+  disabled,
+}: {
+  prevCursor: string | null;
+  nextCursor: string | null;
+  onPage: (cursor: string | null) => void;
+  pageSize: number;
+  total: number;
+  disabled: boolean;
+}) {
+  if (prevCursor === null && nextCursor === null && total <= pageSize) return null;
+  return (
+    <div className="flex items-center justify-between gap-2 text-xs text-ink-300">
+      <span>
+        Page size {pageSize} · {total} total
+      </span>
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          tone="ghost"
+          disabled={prevCursor === null || disabled}
+          onClick={() => onPage(prevCursor)}
+        >
+          ← Prev
+        </Button>
+        <Button
+          size="sm"
+          tone="ghost"
+          disabled={nextCursor === null || disabled}
+          onClick={() => onPage(nextCursor)}
+        >
+          Next →
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // td-nky2js: colour-code label chips by family so Charlie's eye picks out
-// pipeline-state at a glance. Comments document the mapping rationale.
+// pipeline-state at a glance.
 function labelTone(label: string): string {
-  // Pipeline-state labels (load-bearing per gc-labels-state-sling-delivery memory)
   if (label === 'approved' || label.endsWith('-approved')) {
     return 'bg-accent-700/30 border-accent-700/40 text-accent-500';
   }
@@ -379,16 +447,14 @@ function labelTone(label: string): string {
     return 'bg-warn-500/20 border-warn-500/40 text-warn-500';
   }
   if (label === 'blocked' || label === 'mayor-skip' || label === 'mayor-needs-human') {
-    return 'bg-error-500/20 border-error-500/40 text-error-500';
+    return 'bg-error-500/20 border-error-500/30 text-error-500';
   }
-  // Scope + admin labels
   if (label.startsWith('scope:')) {
     return 'bg-ink-700 border-ink-600 text-ink-200';
   }
   if (label.startsWith('gc:') || label.startsWith('agent:')) {
     return 'bg-ink-800 border-ink-700 text-ink-300';
   }
-  // Default — distinct enough to read but quiet enough not to fight the state labels
   return 'bg-ink-700/60 border-ink-600 text-ink-200';
 }
 

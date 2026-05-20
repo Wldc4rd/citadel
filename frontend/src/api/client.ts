@@ -1,6 +1,5 @@
 import type {
   GcSession,
-  GcBead,
   GcMailItem,
   TranscriptResult,
   MailComposeRequest,
@@ -16,6 +15,8 @@ import type {
   KanbanResponse,
   PipelineStageCounts,
   ThroughputTrend,
+  ListBeadsParams,
+  ListBeadsResponse,
   ApiError,
 } from 'citadel-shared';
 
@@ -87,15 +88,18 @@ export const api = {
   nudgeSession(id: string, message?: string): Promise<{ ok: true; stdout: string; duration_ms: number }> {
     return request('POST', `/api/sessions/${encodeURIComponent(id)}/nudge`, message ? { message } : {});
   },
-  listBeads(showAll?: boolean): Promise<{
-    items: GcBead[];
-    total: number;
-    upstream_total?: number;
-    upstream_fetched?: number;
-    fetch_limit?: number;
-  }> {
-    const qs = showAll ? '?showAll=1' : '';
-    return request('GET', `/api/beads${qs}`);
+  listBeads(params?: ListBeadsParams): Promise<ListBeadsResponse> {
+    const qs = new URLSearchParams();
+    if (params?.sort) qs.set('sort', params.sort);
+    if (params?.order) qs.set('order', params.order);
+    if (params?.label) qs.set('label', params.label);
+    if (params?.status) qs.set('status', params.status);
+    if (params?.type) qs.set('type', params.type);
+    if (params?.cursor) qs.set('cursor', params.cursor);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.showAll) qs.set('showAll', '1');
+    const s = qs.toString();
+    return request('GET', `/api/beads${s.length > 0 ? `?${s}` : ''}`);
   },
   claimBead(id: string): Promise<{ ok: true; stdout: string }> {
     return request('POST', `/api/beads/${encodeURIComponent(id)}/claim`, {});

@@ -59,7 +59,15 @@ export class GcClient {
 
   async listBeads(
     signal?: AbortSignal,
-    params?: { limit?: number; status?: 'closed' | 'open' | 'in_progress' | 'blocked' },
+    params?: {
+      limit?: number;
+      offset?: number;
+      status?: 'closed' | 'open' | 'in_progress' | 'blocked';
+      type?: string;
+      label?: string;
+      sort?: string;
+      order?: 'asc' | 'desc';
+    },
   ): Promise<GcBeadList> {
     // td-7t24i6 (Charlie's corrected diagnosis): gc supervisor defaults
     // /beads to limit=50, which is far below the city's working set
@@ -75,9 +83,20 @@ export class GcClient {
     // most-recently-closed window. Pipeline-stage-counts uses the default
     // (open-ish) view so the spam filter has the same input as the Beads
     // page.
+    //
+    // cd-d68p: extended with offset/type/label/sort/order for the
+    // server-side Beads list. The supervisor accepts these as standalone
+    // params (verified). Comma-list / multi-value type isn't supported
+    // upstream — for the engineering view that needs {feature,bug,task,docs}
+    // the caller issues four queries concurrently and merges.
     const search = new URLSearchParams();
     if (params?.limit) search.set('limit', String(params.limit));
+    if (params?.offset) search.set('offset', String(params.offset));
     if (params?.status) search.set('status', params.status);
+    if (params?.type) search.set('type', params.type);
+    if (params?.label) search.set('label', params.label);
+    if (params?.sort) search.set('sort', params.sort);
+    if (params?.order) search.set('order', params.order);
     const qs = search.toString();
     const path = `/beads${qs.length > 0 ? `?${qs}` : ''}`;
     return this.getJson<GcBeadList>(this.cityPath(path), signal);

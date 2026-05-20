@@ -122,7 +122,7 @@ export function CockpitPage() {
 
   const refreshBeads = useCallback(async () => {
     try {
-      const { items } = await api.listBeads(true);
+      const { items } = await api.listBeads({ showAll: true, limit: 1000 });
       setBeads({ data: items, fetchedAt: Date.now(), error: null });
     } catch (err) {
       setBeads((prev) => ({

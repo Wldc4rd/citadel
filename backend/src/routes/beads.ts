@@ -1,60 +1,227 @@
 import { Router } from 'express';
-import type { BeadDetailRaw, BeadDetailResponse, GcBead } from 'citadel-shared';
+import type {
+  BeadDetailRaw,
+  BeadDetailResponse,
+  BeadSortKey,
+  BeadSortOrder,
+  GcBead,
+  ListBeadsResponse,
+} from 'citadel-shared';
 import type { GcClient } from '../gc-client.js';
 import { execBdShow, execBeadAction, ExecError } from '../exec.js';
 import { renderMarkdownSafe } from '../markdown.js';
 import { recordAudit } from '../audit.js';
 
-// v0 hardcoded spam filter. Comments here are the load-bearing
-// documentation — "why isn't bead X showing" has a file/line answer.
-//   - issue_type in {feature, bug, task, docs}  : engineering work only
-//   - NOT label starting 'gc:'                  : session/message noise
-//   - NOT issue_type 'convoy'                   : auto-convoy trackers
-//
-// ?showAll=1 disables the filter for diagnostic cases.
-function defaultBeadFilter(bead: GcBead): boolean {
-  const allowedTypes = new Set(['feature', 'bug', 'task', 'docs']);
-  if (!allowedTypes.has(bead.issue_type)) return false;
-  if (Array.isArray(bead.labels) && bead.labels.some((l) => l.startsWith('gc:'))) {
-    return false;
-  }
-  return true;
-}
-
 // Must mirror BEAD_ID_RE in exec.ts so claim/close/nudge (write) and
 // the drill-in /:id (read) accept the same prefix set: td/th/jt/cd/thriva.
 const BEAD_ID_RE = /^(td|th|jt|cd|thriva)-[a-z0-9-]{3,32}$/;
 
-// td-7t24i6 fix: gc default /beads limit is 50, far below the city's working
-// set (~2139 total, ~183 eng-only). Pull a wide window so the spam filter
-// operates on the full set, not a 50-item slice. 1000 is well over the
-// current ~183-item eng-only count and leaves headroom; safety cap in case
-// the supervisor returns more.
-const BEADS_FETCH_LIMIT = 1000;
+// cd-d68p: pagination + filter + sort moved server-side. Mayor's
+// pragmatic defaults: cursor pagination, server-side WHERE/ORDER BY,
+// server returns next-cursor each page.
+//
+// DEFAULT_PAGE_SIZE 50 keeps interactive pages small and responsive.
+// MAX_PAGE_SIZE 1000 is the supervisor's natural cap; the Beads UI
+// stays under the mayor's 200-per-page guidance by default, while bulk
+// callers (Cockpit "all beads" panels, AgentDetail's assignee filter)
+// can opt into the larger window without paginating through the API.
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 1000;
+// Engineering view (default) issues four type-filtered supervisor
+// queries and merges the result. Each query is bounded to keep total
+// memory + latency predictable even at heavy growth.
+const ENGINEERING_TYPES: ReadonlyArray<string> = ['feature', 'bug', 'task', 'docs'];
+const ENGINEERING_PER_TYPE_LIMIT = 1000;
+const VALID_SORT_KEYS: ReadonlySet<BeadSortKey> = new Set<BeadSortKey>([
+  'id',
+  'priority',
+  'created_at',
+  'updated_at',
+  'status',
+]);
+const VALID_STATUS = new Set(['open', 'in_progress', 'blocked', 'closed']);
+const LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,63}$/;
+const TYPE_RE = /^[a-z][a-z_-]{0,31}$/;
+
+function parsePositiveInt(raw: unknown, fallback: number, max: number): number {
+  if (typeof raw !== 'string') return fallback;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 1) return fallback;
+  return Math.min(n, max);
+}
+
+function encodeCursor(offset: number): string {
+  return Buffer.from(JSON.stringify({ o: offset }), 'utf8').toString('base64url');
+}
+
+function decodeCursor(raw: unknown): number {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 256) return 0;
+  try {
+    const decoded = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as { o?: unknown };
+    const offset = decoded?.o;
+    if (typeof offset === 'number' && Number.isFinite(offset) && offset >= 0 && offset < 1_000_000) {
+      return offset;
+    }
+  } catch {
+    /* falls through to 0 — invalid cursors are treated as start-of-list */
+  }
+  return 0;
+}
+
+interface ParsedQuery {
+  sort: BeadSortKey;
+  order: BeadSortOrder;
+  label: string | undefined;
+  status: 'open' | 'in_progress' | 'blocked' | 'closed' | undefined;
+  type: string | undefined;
+  offset: number;
+  limit: number;
+  showAll: boolean;
+}
+
+function parseListQuery(query: Record<string, unknown>): ParsedQuery | { error: string } {
+  const sortRaw = typeof query.sort === 'string' ? query.sort : undefined;
+  const sort: BeadSortKey = sortRaw && VALID_SORT_KEYS.has(sortRaw as BeadSortKey)
+    ? (sortRaw as BeadSortKey)
+    : 'updated_at';
+  const orderRaw = typeof query.order === 'string' ? query.order : undefined;
+  const order: BeadSortOrder = orderRaw === 'asc' ? 'asc' : 'desc';
+
+  const label = typeof query.label === 'string' && LABEL_RE.test(query.label) ? query.label : undefined;
+  if (typeof query.label === 'string' && query.label.length > 0 && label === undefined) {
+    return { error: 'invalid label' };
+  }
+  const statusRaw = typeof query.status === 'string' ? query.status : undefined;
+  if (statusRaw && !VALID_STATUS.has(statusRaw)) return { error: 'invalid status' };
+  const type = typeof query.type === 'string' && TYPE_RE.test(query.type) ? query.type : undefined;
+  if (typeof query.type === 'string' && query.type.length > 0 && type === undefined) {
+    return { error: 'invalid type' };
+  }
+
+  const limit = parsePositiveInt(query.limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+  const offset = decodeCursor(query.cursor);
+  const showAll = query.showAll === '1';
+
+  return {
+    sort,
+    order,
+    label,
+    status: (statusRaw as ParsedQuery['status']) ?? undefined,
+    type,
+    offset,
+    limit,
+    showAll,
+  };
+}
+
+function compareForSort(a: GcBead, b: GcBead, sort: BeadSortKey, order: BeadSortOrder): number {
+  const dir = order === 'asc' ? 1 : -1;
+  // Read the requested sort field, falling back to created_at when the
+  // primary is missing (updated_at is not always populated by the
+  // supervisor; see gc-supervisor-s-v0-city-name-beads-endpoint memory).
+  const get = (bead: GcBead): string | number | null => {
+    switch (sort) {
+      case 'id': return bead.id;
+      case 'priority': return bead.priority ?? null;
+      case 'created_at': return bead.created_at ?? null;
+      case 'updated_at': return bead.updated_at ?? bead.created_at ?? null;
+      case 'status': return bead.status ?? null;
+      default: return null;
+    }
+  };
+  const av = get(a);
+  const bv = get(b);
+  if (av === bv) {
+    // Stable tiebreak by id (lex, asc) so the page boundaries don't slide.
+    return a.id.localeCompare(b.id);
+  }
+  if (av === null) return -dir;
+  if (bv === null) return dir;
+  if (av < bv) return -dir;
+  if (av > bv) return dir;
+  return 0;
+}
 
 export function beadsRouter(gc: GcClient, cityPath: string): Router {
   const router = Router();
 
   router.get('/', async (req, res) => {
+    const parsed = parseListQuery(req.query as Record<string, unknown>);
+    if ('error' in parsed) {
+      res.status(400).json({ error: parsed.error, kind: 'validation' });
+      return;
+    }
+    const { sort, order, label, status, type, offset, limit, showAll } = parsed;
+
     try {
-      const { items, total } = await gc.listBeads(undefined, { limit: BEADS_FETCH_LIMIT });
-      const showAll = req.query.showAll === '1';
-      const filtered = showAll ? items : items.filter(defaultBeadFilter);
-      res.json({
-        items: filtered,
-        total: filtered.length,
-        // upstream_total: the store's total bead count (per gc's `total`
-        // field). Diff between upstream_total and items.length tells the UI
-        // how much was truncated by our fetch limit so Charlie can see when
-        // the window isn't covering everything.
-        upstream_total: typeof total === 'number' ? total : undefined,
-        upstream_fetched: items.length,
-        fetch_limit: BEADS_FETCH_LIMIT,
-      });
+      // Two materialisation paths:
+      //
+      //   "passthrough": the caller specified showAll OR an explicit type
+      //   filter. We forward exactly one supervisor query with sort+order
+      //   +offset+limit applied upstream. Supervisor's `total` is the
+      //   filter-matching count; the page is what the supervisor returns.
+      //
+      //   "engineering" (default): hide non-engineering noise. The
+      //   supervisor doesn't accept a comma-list of types, so we fan out
+      //   four parallel queries (one per engineering type) with the
+      //   filter+sort upstream, then merge, sort once locally to break
+      //   ties consistently across the four sources, and slice the
+      //   requested page. Total is the sum of the four supervisor totals.
+      const view: 'engineering' | 'passthrough' = (showAll || type) ? 'passthrough' : 'engineering';
+
+      const sharedParams = { sort, order, status, label };
+      let items: GcBead[];
+      let total: number;
+
+      if (view === 'passthrough') {
+        const upstream = await gc.listBeads(undefined, {
+          ...sharedParams,
+          type,
+          offset,
+          limit,
+        });
+        items = upstream.items;
+        total = typeof upstream.total === 'number' ? upstream.total : items.length;
+      } else {
+        const responses = await Promise.all(
+          ENGINEERING_TYPES.map((t) =>
+            gc.listBeads(undefined, {
+              ...sharedParams,
+              type: t,
+              limit: ENGINEERING_PER_TYPE_LIMIT,
+            }),
+          ),
+        );
+        const merged: GcBead[] = [];
+        let upstreamSum = 0;
+        for (const r of responses) {
+          merged.push(...r.items);
+          upstreamSum += typeof r.total === 'number' ? r.total : r.items.length;
+        }
+        merged.sort((a, b) => compareForSort(a, b, sort, order));
+        total = upstreamSum;
+        items = merged.slice(offset, offset + limit);
+      }
+
+      const next_cursor = offset + items.length < total ? encodeCursor(offset + limit) : null;
+      const prev_cursor = offset > 0 ? encodeCursor(Math.max(0, offset - limit)) : null;
+      const payload: ListBeadsResponse = {
+        items,
+        total,
+        next_cursor,
+        prev_cursor,
+        page_size: limit,
+        sort,
+        order,
+        view,
+      };
+      res.json(payload);
     } catch (err) {
-      res
-        .status(502)
-        .json({ error: 'failed to list beads', kind: 'upstream', details: { message: (err as Error).message } });
+      res.status(502).json({
+        error: 'failed to list beads',
+        kind: 'upstream',
+        details: { message: (err as Error).message },
+      });
     }
   });
 
