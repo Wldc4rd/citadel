@@ -267,13 +267,23 @@ export async function execMailSend(
 // but a fresh committer date, so the list APPEARED unsorted to the
 // reader even though git's internal order was correct. Sorting and
 // displaying on the same date (commit date) keeps them in lockstep.
-// --date-order is defensive on multi-ref walks where the default order
-// can vary with topology; for single-ref (recent-main) it's a no-op
-// but harmless.
+// --date-order is a no-op for single-ref recent-main but kept for
+// uniform command construction across views; on multi-ref walks
+// (recent-all / today / this-week) it forces deterministic
+// chronological interleave when the default topo-order would vary
+// with the branch graph.
+//
+// Exported so routes/git.ts can mirror the format as a single source
+// of truth — drift between exec.ts and git.ts caused a 6-month-out
+// silent divergence risk per cd-q9cu review.
+export const GIT_PRETTY_FORMAT = '%H%x09%h%x09%an%x09%cI%x09%D%x09%s';
+const GIT_PRETTY_ARG = `--pretty=format:${GIT_PRETTY_FORMAT}`;
+
 const GIT_LOG_VIEWS: Record<string, string[]> = {
   'recent-main': [
     'log',
-    '--pretty=format:%H%x09%h%x09%an%x09%cI%x09%D%x09%s',
+    '--date-order',
+    GIT_PRETTY_ARG,
     '-n',
     '200',
     'origin/main',
@@ -281,7 +291,7 @@ const GIT_LOG_VIEWS: Record<string, string[]> = {
   'recent-all': [
     'log',
     '--date-order',
-    '--pretty=format:%H%x09%h%x09%an%x09%cI%x09%D%x09%s',
+    GIT_PRETTY_ARG,
     '-n',
     '200',
     '--branches',
@@ -290,7 +300,7 @@ const GIT_LOG_VIEWS: Record<string, string[]> = {
   today: [
     'log',
     '--date-order',
-    '--pretty=format:%H%x09%h%x09%an%x09%cI%x09%D%x09%s',
+    GIT_PRETTY_ARG,
     '--since=24.hours.ago',
     '--branches',
     '--remotes',
@@ -298,7 +308,7 @@ const GIT_LOG_VIEWS: Record<string, string[]> = {
   'this-week': [
     'log',
     '--date-order',
-    '--pretty=format:%H%x09%h%x09%an%x09%cI%x09%D%x09%s',
+    GIT_PRETTY_ARG,
     '--since=7.days.ago',
     '--branches',
     '--remotes',
