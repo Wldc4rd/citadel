@@ -107,6 +107,27 @@ export function mailRouter(gc: GcClient): Router {
   return router;
 }
 
+// The dashboard owner has a display alias ('charlie') distinct from
+// their gc-wire alias ('human'). exec.ts pins --from=human on mail-send,
+// and inbound mail for the dashboard owner is also addressed to 'human'.
+// Without this expansion, viewing-as-charlie returns an empty inbox even
+// when there are 5+ messages addressed to 'human' (cd-d9db).
+//
+// Symmetric so 'human' selected manually shows the same view. Hardcodes
+// the charlie↔human pair; making this config-driven for non-Charlie
+// adopters is part of td-4k317p (cd-c6oc multi-tenancy follow-up).
+const OWNER_ALIASES: ReadonlyArray<[string, string]> = [['charlie', 'human']];
+
+function expandOwnerAlias(alias: string): Set<string> {
+  const a = alias.toLowerCase();
+  const out = new Set<string>([a]);
+  for (const [x, y] of OWNER_ALIASES) {
+    if (a === x) out.add(y);
+    else if (a === y) out.add(x);
+  }
+  return out;
+}
+
 function filterByBox(
   items: GcMailItem[],
   box: 'inbox' | 'sent' | 'all',
@@ -114,11 +135,11 @@ function filterByBox(
 ): GcMailItem[] {
   // Aliases are case-insensitive at our scale — gc emits a mix of styles
   // (e.g. 'thriva/devpipeline.architect' vs 'human'). Lowercase both sides.
-  const a = alias.toLowerCase();
+  const matchSet = expandOwnerAlias(alias);
   if (box === 'all') return items.slice();
   if (box === 'inbox') {
-    return items.filter((m) => typeof m.to === 'string' && m.to.toLowerCase() === a);
+    return items.filter((m) => typeof m.to === 'string' && matchSet.has(m.to.toLowerCase()));
   }
   // sent
-  return items.filter((m) => typeof m.from === 'string' && m.from.toLowerCase() === a);
+  return items.filter((m) => typeof m.from === 'string' && matchSet.has(m.from.toLowerCase()));
 }
