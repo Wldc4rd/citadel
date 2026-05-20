@@ -21,8 +21,18 @@ import type { Request } from 'express';
 
 const LOOPBACK_HOSTNAMES = new Set<string>(['127.0.0.1', 'localhost', '::1']);
 
+// Single source of bracket-stripping + casefolding for hostnames coming
+// from URL.hostname (no brackets, per WHATWG URL) AND from req.hostname
+// (may have brackets depending on Host header form). Mirrors the pattern
+// in middleware/security.ts::hostnameOnly so the supervisor-URL layer
+// and the host-allowlist layer normalise the same way (review feedback
+// on this bead).
+function normalizeHostname(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, '').toLowerCase();
+}
+
 function isLoopbackHostname(hostname: string): boolean {
-  return LOOPBACK_HOSTNAMES.has(hostname.toLowerCase());
+  return LOOPBACK_HOSTNAMES.has(normalizeHostname(hostname));
 }
 
 function parseUrl(url: string): URL | null {
@@ -35,7 +45,11 @@ function parseUrl(url: string): URL | null {
 
 function originOf(parsed: URL, host: string): string {
   const portSuffix = parsed.port ? `:${parsed.port}` : '';
-  return `${parsed.protocol}//${host.toLowerCase()}${portSuffix}`;
+  const bare = normalizeHostname(host);
+  // IPv6 literals MUST be bracketed in a URL — `http://::1:8372` is
+  // unparseable, only `http://[::1]:8372` round-trips through new URL().
+  const hostInUrl = bare.includes(':') ? `[${bare}]` : bare;
+  return `${parsed.protocol}//${hostInUrl}${portSuffix}`;
 }
 
 export function buildSupervisorCspSources(
@@ -62,17 +76,18 @@ export function rewriteSupervisorUrlForBrowser(
   if (!parsed) return supervisorUrl;
   if (!isLoopbackHostname(parsed.hostname)) return supervisorUrl;
 
-  const browserHost = (req.hostname || '').toLowerCase();
+  const browserHost = normalizeHostname(req.hostname || '');
   if (!browserHost) return supervisorUrl;
 
   // Defence-in-depth: the host-header allowlist middleware already vetted
   // req.hostname before we got here, but match the same allowlist anyway
   // so any future bypass can't lead us to hand the browser a URL we
-  // didn't sanction.
+  // didn't sanction. Normalise both sides through the same helper so an
+  // IPv6 entry like '[::1]' in either source still resolves.
   const allowed = new Set<string>([
     '127.0.0.1',
     'localhost',
-    ...extraAllowedHosts.map((s) => s.toLowerCase()),
+    ...extraAllowedHosts.map(normalizeHostname),
   ]);
   if (!allowed.has(browserHost)) return supervisorUrl;
 
