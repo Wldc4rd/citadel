@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { loadAppConfig } from '../api/appConfig';
 
-// Direct EventSource against gc supervisor's /v0/city/{name}/events/stream.
-// Architect addendum td-wisp-ijk7g + mechanic td-wisp-e1v14: gc supervisor
-// serves real SSE on this path and its CORS is permissive (echoes Origin,
-// allows all verbs, supports Last-Event-ID). No backend cursor-poll
-// wrapper needed.
+// EventSource against the dashboard's own same-origin SSE proxy at
+// /api/events/stream. The backend pipes the gc supervisor's real SSE
+// stream over loopback (see backend/src/routes/events.ts).
 //
-// CSP connect-src already includes the supervisor URL (see security
-// middleware). The browser opens the stream directly.
+// cd-16a94: this used to open EventSource cross-origin straight at the
+// supervisor (:8372). But the supervisor's CORS only echoes
+// Access-Control-Allow-Origin for loopback page origins, so when the
+// dashboard was reached over the LAN (http://thriva-dev:8081) the browser
+// CORS-blocked every connection and the indicator flapped forever, never
+// 'open'. Going through the same-origin proxy removes the cross-origin
+// problem entirely — connect-src 'self' covers it.
 
 export type GcEventConnState = 'connecting' | 'open' | 'closed';
 
@@ -34,16 +36,16 @@ export function useGcEventRefresh(
     let lastEventId: string | null = null;
     let retryDelayMs = 1_000;
 
-    const connect = async () => {
+    const connect = () => {
       try {
-        const cfg = await loadAppConfig();
-        if (cancelled) return;
-        // The supervisor's stream path lives under /v0/city/{name}/events/stream.
-        const u = new URL(
-          `${cfg.supervisorUrl}/v0/city/${encodeURIComponent(cfg.city)}/events/stream`,
-        );
-        if (lastEventId) u.searchParams.set('after', lastEventId);
-        es = new EventSource(u, { withCredentials: false });
+        // Same-origin proxy path. We drive reconnection ourselves (close +
+        // re-create with backoff below), so the browser's automatic
+        // Last-Event-ID header won't carry across; pass the resume cursor
+        // explicitly as ?after=. The backend honours both.
+        const u = `/api/events/stream${
+          lastEventId ? `?after=${encodeURIComponent(lastEventId)}` : ''
+        }`;
+        es = new EventSource(u);
         setState('connecting');
         es.onopen = () => {
           if (cancelled) return;
@@ -84,7 +86,7 @@ export function useGcEventRefresh(
           // Exponential backoff capped at 30s.
           retryTimer = setTimeout(() => {
             retryDelayMs = Math.min(retryDelayMs * 2, 30_000);
-            void connect();
+            connect();
           }, retryDelayMs);
         };
       } catch {
@@ -92,12 +94,12 @@ export function useGcEventRefresh(
         setState('closed');
         retryTimer = setTimeout(() => {
           retryDelayMs = Math.min(retryDelayMs * 2, 30_000);
-          void connect();
+          connect();
         }, retryDelayMs);
       }
     };
 
-    void connect();
+    connect();
 
     return () => {
       cancelled = true;

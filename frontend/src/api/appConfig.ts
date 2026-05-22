@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 
 // Single source of truth for the small bootstrap config the frontend
-// needs from the backend: the supervisor URL (for direct SSE) and the
-// city name (for display + SSE stream path). Cached after first fetch
+// needs from the backend: the city name (for display). The event stream
+// is reached via the same-origin /api/events/stream proxy (cd-16a94), so
+// no supervisor URL is surfaced here any more. Cached after first fetch
 // so a page with many consumers makes one request.
 
 export interface AppConfig {
-  supervisorUrl: string;
   city: string;
 }
 
@@ -27,7 +27,6 @@ export function loadAppConfig(): Promise<AppConfig> {
     })
     .then((j) => {
       const cfg: AppConfig = {
-        supervisorUrl: String(j.supervisor_url),
         city: String(j.city),
       };
       cached = cfg;

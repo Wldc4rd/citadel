@@ -68,18 +68,19 @@ export function originCheck(port: number, extraAllowedHosts: ReadonlyArray<strin
   };
 }
 
-export function securityHeaders(extraConnectSrc: ReadonlyArray<string> = []) {
-  // Phase C addendum td-wisp-ijk7g: the browser opens an EventSource
-  // directly against gc supervisor at a different origin (different port).
-  // CSP connect-src must enumerate the supervisor URL explicitly — 'self'
-  // would not cover http://127.0.0.1:8372. Pass the gc base URL in here.
-  const connectSrc = ["'self'", ...extraConnectSrc].join(' ');
+export function securityHeaders() {
+  // connect-src is 'self' only. The browser's sole cross-component channel
+  // is the same-origin SSE proxy at /api/events/stream (cd-16a94); nothing
+  // is fetched from another origin. (Phase C once opened EventSource direct
+  // at the gc supervisor on :8372 and had to enumerate that origin here, but
+  // the supervisor's CORS only allows loopback page origins, so cross-origin
+  // never worked from the LAN — the proxy removed the need entirely.)
   const csp = [
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
-    `connect-src ${connectSrc}`,
+    "connect-src 'self'",
     "object-src 'none'",
     "frame-ancestors 'none'",
     "base-uri 'none'",

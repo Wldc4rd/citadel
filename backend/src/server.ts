@@ -21,11 +21,8 @@ import { buildsRouter } from './routes/builds.js';
 import { healthRouter } from './routes/health.js';
 import { doltRouter, startDoltNomsSampler } from './routes/dolt.js';
 import { adminRouter } from './routes/admin.js';
+import { eventsRouter } from './routes/events.js';
 import { setAuditLogPath, setAuditOwnerAlias } from './audit.js';
-import {
-  buildSupervisorCspSources,
-  rewriteSupervisorUrlForBrowser,
-} from './supervisor-url.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -47,15 +44,13 @@ function main(): void {
   // ── Security middleware (V0-SHIP-REQUIRED) ────────────────────────────
   app.use(hostHeaderAllowlistFactory(config.extraAllowedHosts));
   app.use(originCheck(config.port, config.extraAllowedHosts));
-  // CSP connect-src extension: Phase C wires EventSource direct to gc
-  // supervisor for /events/stream. Different port = different origin under
-  // same-origin policy, so the supervisor URL must be explicitly enumerated.
-  // When the configured URL is loopback, we enumerate the same supervisor
-  // port on every allowed host so the browser can reach it via whichever
-  // hostname the dashboard is served on (cd-7d6n).
-  app.use(securityHeaders(
-    buildSupervisorCspSources(config.gcSupervisorUrl, config.extraAllowedHosts),
-  ));
+  // CSP connect-src is just 'self': the browser's only event stream is the
+  // same-origin SSE proxy at /api/events/stream (cd-16a94). Earlier Phase C
+  // opened EventSource cross-origin straight at the gc supervisor, which
+  // required enumerating supervisor origins here (cd-7d6n) — but the
+  // supervisor's CORS only allows loopback page origins, so cross-origin
+  // never worked from LAN. The proxy removed that dependency entirely.
+  app.use(securityHeaders());
   app.use(csrfIssueCookie);
 
   // ── Health check (no CSRF, no privileged access) ──────────────────────
@@ -92,25 +87,21 @@ function main(): void {
   writeRouter.use('/dolt-noms', doltRouter());
   // Cockpit (td-a40qsy) — engine gauges + destructive common knobs.
   writeRouter.use('/admin', adminRouter(gc, config.cityPath));
+  // Same-origin SSE proxy (cd-16a94): the browser opens EventSource here,
+  // the backend pipes the supervisor stream over loopback. GET-only, so it
+  // passes csrfValidate untouched.
+  writeRouter.use('/events', eventsRouter(gc));
 
   app.use('/api', writeRouter);
 
-  // Frontend needs to know the gc supervisor URL to open EventSource
-  // direct (architect addendum td-wisp-ijk7g). The CSP already allows
-  // it; this endpoint is the one place that surfaces it to the browser
-  // so the URL isn't hardcoded in two places. When the configured URL
-  // is loopback, the URL handed to the browser is rewritten to use the
-  // same hostname the browser used to reach us (cd-7d6n). `owner_alias`
-  // is bootstrap identity for the frontend (td-4k317p): ViewingAsContext
-  // defaults to it, "Claim as X" / "Sends as X" UI strings render it.
-  // Default `'human'` matches the backend's GC_CITY_OWNER_ALIAS floor.
-  app.get('/api/config/gc-supervisor', (req, res) => {
+  // Bootstrap config for the frontend. `city` is the display name (Sidebar,
+  // Cockpit); `owner_alias` is bootstrap identity (td-4k317p): ViewingAsContext
+  // defaults to it, "Claim as X" / "Sends as X" UI strings render it. Default
+  // `'human'` matches the backend's GC_CITY_OWNER_ALIAS floor. The supervisor
+  // URL is no longer surfaced — the browser reaches the event stream through
+  // the same-origin /api/events/stream proxy (cd-16a94), not directly.
+  app.get('/api/config/gc-supervisor', (_req, res) => {
     res.json({
-      supervisor_url: rewriteSupervisorUrlForBrowser(
-        config.gcSupervisorUrl,
-        req,
-        config.extraAllowedHosts,
-      ),
       city: config.cityName,
       owner_alias: config.cityOwnerAlias,
     });
